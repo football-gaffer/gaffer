@@ -1008,38 +1008,38 @@
   /* The same pitch as team selection, not a thumbnail of it. Its height comes
      from whatever the sheet has spare and the width follows the proportions,
      so it is as large as the screen allows and never the wrong shape. */
-  .pitch.build-pitch{width:100%; padding-bottom:132%; height:auto; min-height:0;
-    margin:0 auto;}
-  /* The builder is an editor, not a notice — it takes the screen. The pitch was
-     squat because the sheet only claimed the height it happened to need, which
-     left the keeper sitting on top of the centre-backs. */
-  .modal.builder{height:94vh; max-height:94vh;}
-  .modal.builder .builder-body{display:flex; flex-direction:column; gap:10px;
-    justify-content:flex-start; max-height:none; overflow-y:auto;}
+  /* Formation builder: keep the entire editor in one view. The pitch uses a
+     fixed 3:4 playing-field ratio instead of padding-bottom:132%, leaving room
+     underneath for every position choice and the single Save & Close control. */
+  .pitch.build-pitch{width:min(100%, 620px); aspect-ratio:3 / 4; height:auto;
+    padding-bottom:0; min-height:0; margin:0 auto;}
+  .modal.builder{height:94vh; max-height:94vh; overflow:hidden;}
+  .modal.builder .builder-body{display:flex; flex-direction:column; gap:8px;
+    justify-content:flex-start; flex:1 1 auto; min-height:0; max-height:none !important;
+    overflow:hidden !important;}
   .modal.builder .builder-body > .build-pitch{flex:0 0 auto;}
-  .modal.builder .builder-body > .role-picker{flex:0 0 auto;}
-  .modal.builder .builder-body > .btn-secondary{flex:0 0 auto; margin-top:0;}
-  /* Let the roles wrap to the width instead of forcing eight across, which
-     clipped the last one off the right edge. */
-  .modal.builder .role-opts{display:flex; flex-wrap:wrap; gap:6px;}
-  .modal.builder .role-opt{flex:1 1 auto; min-width:44px; padding:8px 3px; font-size:11px;}
-  .modal.builder .role-picker-label{margin-bottom:7px;}
+  .modal.builder .builder-body > .role-picker{flex:0 0 auto; margin:4px 0 0;}
+  .modal.builder .role-opts{display:grid; grid-template-columns:repeat(7, minmax(0,1fr));
+    gap:5px;}
+  .modal.builder .role-opt{min-width:0; width:100%; padding:7px 2px; font-size:11px;}
+  .modal.builder .role-picker-label{margin-bottom:5px;}
+  .modal.builder #scoutClose{flex:0 0 auto; margin-top:8px !important;}
 
-  /* A short phone cannot give the pitch a full 132% of the sheet's width and
-     still show the picker and save. Narrowing it keeps the proportions and
-     keeps everything on screen. */
-  @media (max-height: 720px){
-    .modal.builder .builder-body > .build-pitch{max-width:244px;}
+  /* Short screens get a smaller field so the complete picker still remains
+     visible without scrolling. */
+  @media (max-height: 760px){
+    .modal.builder .build-pitch{width:min(100%, 470px);}
+    .modal.builder .role-opts{gap:4px;}
+    .modal.builder .role-opt{padding:6px 2px; font-size:10.5px;}
   }
   @media (max-height: 640px){
-    .modal.builder .builder-body > .build-pitch{max-width:216px;}
-    .modal.builder .role-opt{padding:6px 3px; font-size:10.5px;}
+    .modal.builder .build-pitch{width:min(100%, 380px);}
+    .modal.builder .role-opt{padding:5px 1px; font-size:10px;}
   }
 
-  /* With a mouse the sheet is centred and capped, so it needs a real height. */
   @media (pointer: fine) and (min-width: 1024px){
-    .modal.builder{height:auto; max-height:88vh; max-width:560px;}
-    .modal.builder .builder-body > .build-pitch{max-width:340px;}
+    .modal.builder{height:auto; max-height:88vh; max-width:620px;}
+    .modal.builder .build-pitch{width:min(100%, 430px);}
   }
   .build-pitch .pitch-slot{width:46px; height:46px; font-size:11px;}
   .build-pitch .pitch-slot .ps-name{font-size:11px; max-width:44px; font-weight:700;}
@@ -4305,11 +4305,12 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "3.6.2";
+const GAME_VERSION = "3.6.3";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
 const VERSION_NOTES = {
+  "3.6.3": "Formation builder now fits the pitch, position picker and Save & Close button on one screen — no scrolling needed.",
   "2.0.1": "A scouting brief can now ask for prospects rather than ready-made players, and set both ends of the age range.",
   "3.6.2": "Desktop and laptop space is now used properly: the app fills the window, the team pitch gets a usable share of it, and the squad beside it stays readable.",
   "3.6.1": "Actually fixed the missing navigation on a laptop — the previous attempt targeted the wrong element.",
@@ -14305,6 +14306,8 @@ function chooseDifficulty(club){
   if(sheet0) sheet0.classList.remove("fit", "builder");
   const host0 = document.getElementById("scoutBody");
   if(host0) host0.classList.remove("fit-grow", "builder-body");
+  const footer0 = document.getElementById("scoutClose");
+  if(footer0){ footer0.textContent = "Close"; footer0.disabled = false; footer0.onclick = ()=>{ playClickSound(); document.getElementById("scoutBackdrop").classList.remove("open"); }; }
   const host = document.getElementById("scoutBody");
   const sub = document.getElementById("scoutSub");
   if(!host){ startCareerWith(club, "standard"); return; }
@@ -15098,22 +15101,24 @@ function openFormationBuilder(){
       `<button class="role-opt" data-set="${r}">${r}</button>`).join("")}</div>`;
   host.appendChild(picker);
 
-  const save = document.createElement("button");
-  save.className = "btn-secondary";
-  save.textContent = built.ok ? "Save " + built.name : built.reason;
-  save.disabled = !built.ok;
-  save.onclick = ()=>{
-    const r = saveCustomFormation(builderRoles.slice());
-    if(r.ok){
-      state.tactics.formation = r.name;
-      state.lineup = null;
-      saveState(true);
-      document.getElementById("scoutBackdrop").classList.remove("open");
-      toast("Saved " + r.name, 3000);
-      renderSquad();
-    } else toast(r.reason, 3400);
-  };
-  host.appendChild(save);
+  /* Reuse the sheet footer so there is exactly one action: Save & Close. */
+  const footer = document.getElementById("scoutClose");
+  if(footer){
+    footer.textContent = built.ok ? "Save & Close" : "Close";
+    footer.disabled = !built.ok;
+    footer.onclick = ()=>{
+      if(!built.ok) return;
+      const r = saveCustomFormation(builderRoles.slice());
+      if(r.ok){
+        state.tactics.formation = r.name;
+        state.lineup = null;
+        saveState(true);
+        document.getElementById("scoutBackdrop").classList.remove("open");
+        toast("Saved " + r.name, 3000);
+        renderSquad();
+      } else toast(r.reason, 3400);
+    };
+  }
 
   let picked = null;
   host.querySelectorAll("[data-b]").forEach(b=>{
@@ -15140,6 +15145,8 @@ function openTrainingPicker(p){
   if(sheet0) sheet0.classList.remove("fit", "builder");
   const host0 = document.getElementById("scoutBody");
   if(host0) host0.classList.remove("fit-grow", "builder-body");
+  const footer0 = document.getElementById("scoutClose");
+  if(footer0){ footer0.textContent = "Close"; footer0.disabled = false; footer0.onclick = ()=>{ playClickSound(); document.getElementById("scoutBackdrop").classList.remove("open"); }; }
   const host = document.getElementById("scoutBody");
   const sub = document.getElementById("scoutSub");
   if(!host) return;
@@ -15194,6 +15201,8 @@ function openVoicePicker(){
   if(sheet0) sheet0.classList.remove("fit", "builder");
   const host0 = document.getElementById("scoutBody");
   if(host0) host0.classList.remove("fit-grow", "builder-body");
+  const footer0 = document.getElementById("scoutClose");
+  if(footer0){ footer0.textContent = "Close"; footer0.disabled = false; footer0.onclick = ()=>{ playClickSound(); document.getElementById("scoutBackdrop").classList.remove("open"); }; }
   const host = document.getElementById("scoutBody");
   const sub = document.getElementById("scoutSub");
   if(!host) return;
