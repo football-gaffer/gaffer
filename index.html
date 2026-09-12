@@ -3217,22 +3217,22 @@ function playWhistleSound(){ playTone(1400,0.22,0,"sine"); }
 
 /* =========================================================================
    SPOKEN COMMENTARY
-   Primary engine: hosted neural TTS via the site's Netlify Function.
-   Fallback: device speech synthesis if the TTS service is unavailable.
-
-   Safari/iOS can expose only low-quality system voices to Web Speech. The
-   game's main voices therefore come from OpenAI's neural TTS instead, so the
-   same two commentators work on iPhone, iPad and desktop.
+   GitHub Pages edition: authored commentary is generated ahead of time by a
+   GitHub Action using neural TTS, then served as ordinary MP3 files. This is
+   deliberately NOT a runtime API call: GitHub Pages is static hosting, so no
+   OpenAI key ever reaches the browser. Dynamic sentences fall back to the
+   device voice when there is no pre-generated exact line.
    ========================================================================= */
 const VOICE_KEY = "gaffer_voice";
 const VOICE_ENGINE_KEY = "gaffer_voice_engine";
 const VOICE_PICK_KEY = "gaffer_neural_voice_pick";
-const TTS_ENDPOINT = "/.netlify/functions/tts";
+const NEURAL_AUDIO_BASE = "audio/";
 const NEURAL_VOICES = {
-  lead: {id:"marin", name:"Marin — Match Commentator", instructions:"You are a live football match commentator for a European football management game. Sound like a real British football commentator: confident, warm, spontaneous and expressive. Build excitement for goals, cards and decisive moments, but do not shout every sentence. Use natural rises and falls, short pauses, and conversational emphasis. Never sound like a GPS, audiobook, or customer-service voice. Read the supplied line exactly as the commentary, without adding words."},
-  colour: {id:"cedar", name:"Cedar — Match Analyst", instructions:"You are the second voice on a live football broadcast. Sound like a natural British football analyst: calm, observant, slightly dry when appropriate, and genuinely engaged in the match. React naturally to the supplied commentary, with human pacing and emphasis. Do not sound synthetic, theatrical, or like a navigation system. Read the supplied line exactly as the commentary, without adding words."}
+  lead:{id:"marin",name:"Marin — Match Commentator"},
+  colour:{id:"cedar",name:"Cedar — Match Analyst"}
 };
-let VOICE=null, VOICE2=null, voiceReady=false, _neuralCtx=null, _neuralSource=null, _neuralToken=0;
+let VOICE=null, VOICE2=null, voiceReady=false;
+let _neuralCtx=null, _neuralSource=null, _neuralToken=0, _neuralManifest=null, _neuralManifestPromise=null;
 const _ttsCache=new Map();
 function voiceOn(){ try{return window.localStorage.getItem(VOICE_KEY)==="1";}catch(e){return false;} }
 function setVoiceOn(on){ try{window.localStorage.setItem(VOICE_KEY,on?"1":"0");}catch(e){} if(!on) stopSpeaking(); }
@@ -3244,13 +3244,23 @@ function initVoice(){
   VOICE=NEURAL_VOICES.lead; VOICE2=NEURAL_VOICES.colour;
   if(pick && pick.lead===NEURAL_VOICES.colour.id){VOICE=NEURAL_VOICES.colour; VOICE2=NEURAL_VOICES.lead;}
   voiceReady=true;
+  loadNeuralManifest();
+}
+async function loadNeuralManifest(){
+  if(_neuralManifest) return _neuralManifest;
+  if(_neuralManifestPromise) return _neuralManifestPromise;
+  _neuralManifestPromise=fetch(NEURAL_AUDIO_BASE+"manifest.json",{cache:"no-store"}).then(r=>{
+    if(!r.ok) throw new Error("No neural commentary manifest");
+    return r.json();
+  }).then(m=>{_neuralManifest=m;return m;}).catch(()=>null);
+  return _neuralManifestPromise;
 }
 function ensureNeuralAudioContext(){
   try{
-    if(!_neuralCtx){ const C=window.AudioContext||window.webkitAudioContext; if(!C) return null; _neuralCtx=new C(); }
-    if(_neuralCtx.state === "suspended") _neuralCtx.resume().catch(()=>{});
+    if(!_neuralCtx){const C=window.AudioContext||window.webkitAudioContext;if(!C)return null;_neuralCtx=new C();}
+    if(_neuralCtx.state==="suspended") _neuralCtx.resume().catch(()=>{});
     return _neuralCtx;
-  }catch(e){ return null; }
+  }catch(e){return null;}
 }
 function stopSpeaking(){
   _neuralToken++;
@@ -3264,39 +3274,43 @@ function spokenCommentaryText(text){
     .replace(/\bv\b/gi,"against").replace(/\bFT\b/g,"Full time").replace(/!\s*/g,"! ")
     .replace(/\.\.\.\s*,\s*/g,"... ").replace(/\s+([,.])/g,"$1").replace(/\s{2,}/g," ").trim().slice(0,500);
 }
-async function speakNeuralLine(text,opts){
+async function speakStaticNeural(text,opts){
   const o=opts||{}, spoken=spokenCommentaryText(text); if(!spoken) return false;
-  const ctx=ensureNeuralAudioContext(); if(!ctx) throw new Error("No Web Audio support");
+  const ctx=ensureNeuralAudioContext(); if(!ctx) return false;
+  const manifest=await loadNeuralManifest(); if(!manifest || !manifest.items) return false;
+  const role=o.second?"colour":"lead";
+  const rel=manifest.items[role+"|"+spoken] || manifest.items[role+"|"+String(text)];
+  if(!rel) return false;
   const token=++_neuralToken;
   try{if(_neuralSource){_neuralSource.stop();_neuralSource.disconnect();}}catch(e){} _neuralSource=null;
-  const role=o.second?"colour":"lead", v=NEURAL_VOICES[role]||NEURAL_VOICES.lead, key=v.id+"|"+spoken;
-  let buffer=_ttsCache.get(key);
+  let buffer=_ttsCache.get(rel);
   if(!buffer){
-    const res=await fetch(TTS_ENDPOINT,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:spoken,voice:v.id,instructions:v.instructions,speed:o.rate||(o.second?0.96:1.02)})});
-    if(!res.ok) throw new Error("TTS "+res.status);
-    const data=await res.arrayBuffer(); if(!data.byteLength) throw new Error("Empty TTS audio");
-    buffer=await ctx.decodeAudioData(data); _ttsCache.set(key,buffer);
+    const res=await fetch(NEURAL_AUDIO_BASE+rel,{cache:"force-cache"});
+    if(!res.ok) return false;
+    buffer=await ctx.decodeAudioData(await res.arrayBuffer()); _ttsCache.set(rel,buffer);
   }
-  if(token!==_neuralToken) return true;
-  if(ctx.state === "suspended") await ctx.resume();
+  if(token!==_neuralToken)return true;
+  if(ctx.state==="suspended") await ctx.resume();
   const source=ctx.createBufferSource(); source.buffer=buffer; source.connect(ctx.destination); _neuralSource=source;
   source.onended=()=>{if(_neuralSource===source)_neuralSource=null;};
   source.start(0); return true;
 }
 function speakNativeFallback(text,opts){
-  const o=opts||{}; if(!voiceSupported()) return;
+  const o=opts||{}; if(!voiceSupported())return;
   try{
-    const synth=window.speechSynthesis, spoken=spokenCommentaryText(text).slice(0,200); if(!spoken) return;
-    if(o.urgent||synth.speaking||synth.pending) synth.cancel();
+    const synth=window.speechSynthesis, spoken=spokenCommentaryText(text).slice(0,200); if(!spoken)return;
+    if(o.urgent||synth.speaking||synth.pending)synth.cancel();
     const u=new SpeechSynthesisUtterance(spoken); u.lang="en-GB"; u.rate=clamp(o.rate||0.92,0.55,1.6); u.pitch=o.pitch||(o.second?1.08:0.98); u.volume=1; synth.resume(); synth.speak(u);
   }catch(e){}
 }
 function speakLine(text,opts){
-  const o=opts||{}; if((!voiceOn()&&!o.preview)||!text) return; if(!voiceReady) initVoice();
-  if(neuralVoiceEnabled()) speakNeuralLine(text,o).catch(()=>speakNativeFallback(text,o)); else speakNativeFallback(text,o);
+  const o=opts||{}; if((!voiceOn()&&!o.preview)||!text)return; if(!voiceReady)initVoice();
+  if(neuralVoiceEnabled()){
+    speakStaticNeural(text,o).then(ok=>{if(!ok)speakNativeFallback(text,o);}).catch(()=>speakNativeFallback(text,o));
+  }else speakNativeFallback(text,o);
 }
-try{document.addEventListener("visibilitychange",()=>{if(document.visibilityState!=="visible") stopSpeaking();});}catch(e){}
-try{document.addEventListener("pointerdown",()=>{ensureNeuralAudioContext();},{passive:true});}catch(e){}
+try{document.addEventListener("visibilitychange",()=>{if(document.visibilityState!=="visible")stopSpeaking();});}catch(e){}
+try{document.addEventListener("pointerdown",()=>{ensureNeuralAudioContext();loadNeuralManifest();},{passive:true});}catch(e){}
 
 /* Spoken lines are written to be heard, not read. No minute prefix, no icons,
    no score in digits mid-sentence — a commentator says "two one", and the
@@ -4268,12 +4282,13 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "3.7.0";
+const GAME_VERSION = "3.7.1";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
 const VERSION_NOTES = {
   "3.7.0": "Spoken commentary now uses two natural neural AI broadcast voices (Marin and Cedar) through a secure Netlify Function, with device speech kept as a fallback.",
+  "3.7.1": "GitHub Pages edition: authored commentary is pre-generated as natural Marin and Cedar audio by GitHub Actions; no runtime API key is exposed.",
   "3.6.6": "Commentary speech was hardened against iPhone Safari pause/cancel issues.",
   "3.6.5": "Custom formations can now be deleted with a visible × button on touchscreens, with confirmation before removal.",
   "3.6.4": "Leave it now dismisses the unhappy-player action for the current week instead of immediately reappearing.",
@@ -15177,11 +15192,11 @@ function openVoicePicker(){
   const host=document.getElementById("scoutBody"), sub=document.getElementById("scoutSub"); if(!host) return;
   document.querySelector("#scoutBackdrop h2").textContent="Commentary Voices"; initVoice();
   const neural=neuralVoiceEnabled();
-  sub.textContent=neural?"Natural AI voices · same voices on every device":"Device voices · may sound robotic on iPhone";
+  sub.textContent=neural?"Natural AI voices · pre-generated for GitHub Pages":"Device voices · may sound robotic on iPhone";
   const choices=[NEURAL_VOICES.lead,NEURAL_VOICES.colour];
   const curLead=VOICE&&VOICE.id, curSecond=VOICE2&&VOICE2.id;
   const card=(v,role)=>`<button class="act-row${(role==="lead"?curLead:curSecond)===v.id?" chosen":""}" data-role="${role}" data-neural="${v.id}"><span class="act-icon">${role==="lead"?"●":"◆"}</span><span class="act-text"><span class="act-title">${v.name}</span><span class="act-sub">${role==="lead"?"Main commentator":"Second commentator"}${(role==="lead"?curLead:curSecond)===v.id?" · in use":""}</span></span><span class="act-chev">▶</span></button>`;
-  host.innerHTML=`<div class="act-group">Natural AI voices</div>${card(choices[0],"lead")}${card(choices[1],"colour")}<div class="scout-row"><span class="sr-body"><span class="sr-title">Built for matchday</span><span class="sr-sub">Neural speech is generated by OpenAI, with different broadcast directions for the commentator and analyst. Device speech is only the fallback.</span></span></div><div class="act-group">Engine</div><button class="act-row${neural?" chosen":""}" data-engine="neural"><span class="act-icon">★</span><span class="act-text"><span class="act-title">Natural AI — recommended</span><span class="act-sub">Marin + Cedar · consistent across iPhone, iPad and desktop</span></span><span class="act-chev">▶</span></button><button class="act-row${!neural?" chosen":""}" data-engine="native"><span class="act-icon">·</span><span class="act-text"><span class="act-title">Device voices — fallback</span><span class="act-sub">Uses Safari/iOS speech synthesis</span></span><span class="act-chev">▶</span></button>`;
+  host.innerHTML=`<div class="act-group">Natural AI voices</div>${card(choices[0],"lead")}${card(choices[1],"colour")}<div class="scout-row"><span class="sr-body"><span class="sr-title">Built for matchday</span><span class="sr-sub">Natural Marin and Cedar audio is generated ahead of time by GitHub Actions. Device speech is used only for dynamic lines that cannot be pre-generated.</span></span></div><div class="act-group">Engine</div><button class="act-row${neural?" chosen":""}" data-engine="neural"><span class="act-icon">★</span><span class="act-text"><span class="act-title">Natural AI — recommended</span><span class="act-sub">Marin + Cedar · natural audio on every device</span></span><span class="act-chev">▶</span></button><button class="act-row${!neural?" chosen":""}" data-engine="native"><span class="act-icon">·</span><span class="act-text"><span class="act-title">Device voices — fallback</span><span class="act-sub">Uses Safari/iOS speech synthesis</span></span><span class="act-chev">▶</span></button>`;
   host.querySelectorAll("[data-neural]").forEach(b=>b.onclick=()=>{
     if(b.dataset.neural===NEURAL_VOICES.lead.id){VOICE=NEURAL_VOICES.lead;VOICE2=NEURAL_VOICES.colour;} else {VOICE2=NEURAL_VOICES.colour;}
     try{window.localStorage.setItem(VOICE_PICK_KEY,JSON.stringify({lead:VOICE&&VOICE.id,colour:VOICE2&&VOICE2.id}));}catch(e){}
