@@ -720,63 +720,63 @@
     #content{max-width:1180px;}
   }
 
-  /* ---- NO SCROLLING ON A COMPUTER ----------------------------------------
-     Previously this subtracted the measured header and nav heights from 100vh.
-     If either measurement was a few pixels out — and it was, because the nav is
-     position:fixed and its height depends on the safe-area inset — the content
-     box was the wrong size and `overflow:hidden` quietly cut the bottom off.
+  /* ---- THE DESKTOP SHELL --------------------------------------------------
+     This used to force `overflow:hidden` to guarantee nothing ever scrolled.
+     When content did not fit it was simply clipped, and because the navigation
+     sits at the bottom of the same column it was clipped too — leaving no way
+     off the screen you were on. A hard no-scroll rule is worse than scrolling.
 
-     The shell is now a flex column that measures itself: header takes what it
-     needs, navigation takes what it needs, and the content takes exactly what
-     is left. No arithmetic, nothing to get wrong. */
+     The rule now: the header and the navigation are always visible, and the
+     content between them scrolls only when it genuinely has to. Density work
+     elsewhere means most screens still fit without scrolling at all. */
   @media (min-width: 1024px) and (min-height: 541px) and (pointer: fine){
-    html, body{overflow:hidden; height:100%;}
+    html, body{height:100%; overflow:hidden;}
     #shell{height:100vh; min-height:0; display:flex; flex-direction:column;
       max-width:1180px; padding-right:0;}
 
     #topbar{flex:0 0 auto;}
 
-    /* In the flow rather than fixed, so its height is accounted for by the
-       layout instead of by a guess. */
+    /* In the flow and never clipped, so navigation cannot disappear. */
     #navbar{position:static; flex:0 0 auto; transform:none; left:auto; bottom:auto;
-      width:100%; max-width:none;}
+      width:100%; max-width:none; z-index:5;}
 
-    #content{flex:1 1 auto; min-height:0; height:auto; overflow:hidden;
+    #content{flex:1 1 auto; min-height:0; height:auto;
+      overflow-y:auto; overflow-x:hidden;
       display:flex; flex-direction:column; max-width:none; margin:0;
-      padding:18px 26px 14px !important;}
+      padding:18px 26px 18px !important;}
     .screen{min-height:0;}
     .screen.active{flex:1 1 auto; min-height:0; display:flex; flex-direction:column; gap:0;}
     .card{align-self:start;}
 
-    /* Lists take what is left and no more. */
-    #tableList, #squadList, #transferResults, #benchList{
-      flex:1 1 auto; min-height:0; align-content:start; overflow:hidden;}
+    #tableList, #squadList, #transferResults, #benchList{align-content:start;}
 
-    /* The advance button follows the shell rather than the viewport. */
-    #fabAdvance{position:absolute; right:26px; bottom:70px;}
+    /* Pinned inside the shell rather than the viewport, so they sit above the
+       content but never over the navigation. */
+    #fabAdvance{position:absolute; right:26px; bottom:76px;}
 
-    /* Dashboard across, not down. */
-    /* Scoped to .active. As `#screen-dashboard{display:grid !important}` this
-       beat `.screen{display:none}` outright, so the dashboard stayed on screen
-       underneath every other tab — two screens stacked on top of each other. */
     #screen-dashboard.active{display:grid;
       grid-template-columns:repeat(2, minmax(0,1fr)); gap:0 22px;
-      align-content:start; align-items:start; overflow:hidden;}
+      align-content:start; align-items:start;}
     #screen-dashboard > *{min-width:0; align-self:start;}
 
-    /* Team selection as a split pane, the way every desk-bound football game
-       does it: the shape on the left, the squad on the right, reordered to the
-       position you have selected. The pitch is a fixed column so it keeps its
-       proportions; the squad takes the rest and scrolls within itself rather
-       than pushing the pitch off screen. */
     .pitch-wrap{grid-template-columns:minmax(300px, 0.85fr) minmax(0, 1.15fr);
-      gap:0 26px; min-height:0; align-items:start; height:100%;}
-    .pitch-col{min-height:0; display:flex; flex-direction:column;}
-    .bench-col{min-height:0; height:100%; display:flex; flex-direction:column;}
-    .bench-col #benchList{flex:1 1 auto; min-height:0; overflow-y:auto; padding-right:4px;}
-    .bench-col .section-title{flex:0 0 auto;}
+      gap:0 26px; min-height:0; align-items:start;}
+    .pitch-col{min-height:0;}
+    .bench-col{min-height:0;}
 
-    .page-nav{margin-top:auto; padding-top:8px; align-items:center;}
+    /* The transfer filters are the tallest thing in the game. Across rather
+       than down, so the results are visible without hunting for them. */
+    /* The filters are the tallest thing in the game — search, four position
+       chips, twenty leagues, a sort, three double sliders and four switches.
+       Two columns and tighter rows so the results are on screen with them. */
+    #screen-transfers .filter-row{display:grid; grid-template-columns:repeat(2, minmax(0,1fr));
+      gap:4px 24px; align-items:start;}
+    #screen-transfers .setting-row{padding:7px 0;}
+    #screen-transfers .setting-row .sub{font-size:10.5px;}
+    #screen-transfers #transferTierTabs{max-height:64px; overflow-y:auto;}
+    #screen-transfers .search-input{margin-bottom:8px;}
+
+    .page-nav{padding-top:8px; align-items:center;}
     .page-count{flex:1; text-align:center; font-size:11.5px; color:var(--text-dim);}
   }
 
@@ -4072,6 +4072,9 @@ function decodeSave(raw){
    1.0.0  first release
    2.0.1  a scouting brief can specify an age range and whether you want a
           first-teamer or a prospect
+   3.6.0  the desktop navigation can no longer be clipped off the screen. The
+          forced no-scroll rule was hiding content AND the nav bar with it,
+          leaving no way off whichever page you were on.
    3.5.2  the home screen icon is a PNG. It was an SVG, which iOS does not
           accept for apple-touch-icon, so it had been showing a screenshot of
           the page all along
@@ -4250,12 +4253,13 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "3.5.2";
+const GAME_VERSION = "3.6.0";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
 const VERSION_NOTES = {
   "2.0.1": "A scouting brief can now ask for prospects rather than ready-made players, and set both ends of the age range.",
+  "3.6.0": "Fixed being stranded on a page with no navigation on a laptop. The tabs are now always visible and content scrolls if it needs to.",
   "3.5.2": "The home screen icon now actually works on iPhone. Delete the old icon and add it again to see it.",
   "3.5.1": "Fixed a rare penalty shootout that ended level and was awarded to the away side anyway.",
   "3.5.0": "On a laptop, team selection now puts the pitch on the left and your squad on the right, reordered to whichever position you tap.",
