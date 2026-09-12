@@ -474,22 +474,6 @@
   .pitch-slot.empty .ps-pos{font-size:12px; font-weight:700; font-family:'Barlow Condensed','Helvetica Neue',Arial Narrow,system-ui,sans-serif;}
   .pitch-slot.selected{box-shadow:0 0 0 3px var(--text); z-index:3;}
   .pitch-hint{font-size:11.5px; color:var(--text-dim); text-align:center; margin-bottom:10px;}
-  /* Desktop squad layout: formation and squad remain side-by-side. */
-  @media (min-width:700px){
-    body{align-items:stretch;}
-    #shell{max-width:1400px; min-height:100vh;}
-    #mainApp{min-height:100vh;}
-    #content{min-height:0; padding-left:28px; padding-right:28px; padding-bottom:140px;}
-    #navbar{max-width:1400px;}
-    #advanceFab{max-width:1400px;}
-    .pitch-wrap{display:grid; grid-template-columns:minmax(420px,0.9fr) minmax(500px,1.1fr); gap:24px; align-items:start;}
-    .pitch-col{min-width:0; max-width:600px; width:100%; justify-self:center;}
-    .bench-col{min-width:0; height:calc(100vh - 230px); display:flex; flex-direction:column;}
-    .bench-col .list{flex:1; min-height:0; overflow-y:auto;}
-  }
-  @media (max-width:699px){
-    .pitch-wrap{display:block;}
-  }
 
   .window-strip{font-size:11.5px; text-align:center; padding:8px; border-radius:10px; margin-bottom:12px;
     border:1px solid var(--hairline);}
@@ -594,6 +578,59 @@
   ::-webkit-scrollbar{display:none;}
 
   body.reduced-motion *{animation-duration:0.01ms !important; animation-iteration-count:1 !important; transition-duration:0.01ms !important;}
+
+
+  /* =====================================================================
+     DESKTOP/LAPTOP LAYOUT — v3.6.0 fix
+     Keep the header + Dashboard navigation permanently in view. Only the
+     middle content is allowed to scroll when a screen genuinely needs it.
+     On wide screens use the available width rather than a phone-sized shell.
+     ===================================================================== */
+  @media (min-width:1024px) and (min-height:541px) and (pointer:fine){
+    html,body{height:100%;overflow:hidden;}
+    #shell{height:100vh;max-height:100vh;min-height:0;width:100%;max-width:none;
+      display:flex;flex-direction:column;overflow:hidden;}
+    #mainApp{min-height:0;max-height:100%;overflow:hidden;display:flex;flex-direction:column;flex:1 1 auto;}
+    #topbar{flex:0 0 auto;}
+    #content{flex:1 1 auto;min-height:0;height:auto;overflow-y:auto;overflow-x:hidden;
+      max-width:none;margin:0;padding:18px 32px 18px !important;}
+    #navbar{position:static;left:auto;bottom:auto;transform:none;width:100%;max-width:none;
+      flex:0 0 auto;z-index:8;}
+    #advanceFab{position:static;transform:none;width:100%;max-width:none;flex:0 0 auto;}
+
+    /* Don't turn every screen into a grid. Dashboard alone gets two columns. */
+    #screen-dashboard.active{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:0 22px;align-content:start;align-items:start;}
+    #screen-dashboard.active>*{min-width:0;align-self:start;}
+
+    /* Team selection: pitch left, squad right. */
+    .pitch-wrap{display:grid;grid-template-columns:minmax(300px,.85fr) minmax(0,1.15fr);
+      gap:0 26px;min-height:0;align-items:start;height:auto;}
+    .pitch-col{min-width:0;min-height:0;display:flex;flex-direction:column;}
+    .bench-col{min-width:0;min-height:0;display:flex;flex-direction:column;height:auto;}
+    .bench-col #pitchBench{min-height:0;max-height:calc(100vh - 220px);overflow-y:auto;padding-right:4px;}
+    .bench-col .section-title{flex:0 0 auto;}
+
+    /* Wide-screen player lists: two comfortable columns; a third only when
+       the window is genuinely wide enough to keep names readable. */
+    #tableList,#transferResults,#squadList,#pitchBench,.list{align-content:start;}
+    #tableList,#transferResults,#squadList,#pitchBench,.list{
+      display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 28px;}
+    #pitchBench{grid-template-columns:1fr;}
+
+    /* Transfer filters are side-by-side instead of one huge vertical stack. */
+    #screen-transfers .filter-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:4px 24px;align-items:start;}
+    #screen-transfers .setting-row{padding:7px 0;}
+    #screen-transfers .setting-row .sub{font-size:10.5px;}
+    #screen-transfers #transferTierTabs{max-height:64px;overflow-y:auto;}
+    #screen-transfers .search-input{margin-bottom:8px;}
+  }
+  @media (min-width:1600px) and (min-height:541px) and (pointer:fine){
+    #tableList,#transferResults,#squadList,.list{grid-template-columns:repeat(3,minmax(0,1fr));gap:0 30px;}
+    #pitchBench{grid-template-columns:1fr;}
+  }
+
 </style>
 </head>
 <body>
@@ -2684,7 +2721,7 @@ function decodeSave(raw){
 /* =========================================================================
    VERSION, SAVE SLOTS AND DIAGNOSTICS
    ========================================================================= */
-const GAME_VERSION = "3.6.3";
+const GAME_VERSION = "1.0.0";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Three independent careers. Each slot is its own storage key, so you can keep
@@ -8326,10 +8363,13 @@ function renderPitch(host){
         </div>
         <button class="btn-secondary" id="pitchAuto">Auto-pick best XI</button>
       </div>
-      <aside class="bench-col">
-        <div class="section-title">Squad (${bench.length} available)</div>
+      <div class="bench-col">
+        <div class="section-title" id="benchTitle" style="margin-top:0;">${
+          pitchSelection !== null && slotRoles(fname)[pitchSelection]
+            ? `Best available at <b style="color:var(--accent);">${slotRoles(fname)[pitchSelection]}</b>`
+            : `Squad (${bench.length} available)`}</div>
         <div class="list" id="pitchBench"></div>
-      </aside>
+      </div>
     </div>`;
 
   host.querySelectorAll(".pitch-slot").forEach(btn=>{
