@@ -42,7 +42,7 @@
   #topbar .menu-btn{background:var(--surface-2); border:none; color:var(--text); width:32px; height:32px; border-radius:50%;
     font-size:15px; flex-shrink:0; display:flex; align-items:center; justify-content:center;}
 
-  #content{flex:1; min-height:0; overflow-y:auto; padding:16px 16px calc(24px + var(--safe-bottom));}
+  #content{flex:1; overflow-y:auto; padding:16px 16px calc(24px + var(--safe-bottom));}
   .screen{display:none; animation:fadeIn .2s ease;}
   .screen.active{display:block;}
   @keyframes fadeIn{from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:none;}}
@@ -474,41 +474,21 @@
   .pitch-slot.empty .ps-pos{font-size:12px; font-weight:700; font-family:'Barlow Condensed','Helvetica Neue',Arial Narrow,system-ui,sans-serif;}
   .pitch-slot.selected{box-shadow:0 0 0 3px var(--text); z-index:3;}
   .pitch-hint{font-size:11.5px; color:var(--text-dim); text-align:center; margin-bottom:10px;}
-  /* Squad selection: desktop/laptop gets a true two-pane layout. Mobile stays stacked. */
-  .pitch-wrap{display:grid; grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr); gap:16px; align-items:start;}
-  .pitch-col{min-width:0;}
-  .bench-col{min-width:0; display:flex; flex-direction:column; min-height:0;}
-  .bench-col .list{max-height:calc(100vh - 250px); overflow-y:auto; padding-right:2px;}
-  .bench-col .section-title{margin-top:0;}
-  .bench-col .btn-secondary{margin-bottom:8px;}
-  @media (max-width: 699px){
-    .pitch-wrap{display:block;}
-    .bench-col .list{max-height:none; overflow:visible;}
-  }
+  /* Desktop squad layout: formation and squad remain side-by-side. */
   @media (min-width:700px){
-    /* Laptop layout: use the available width instead of pretending this is a phone. */
     body{align-items:stretch;}
-    #shell{width:100%; max-width:1400px; min-height:100dvh;}
-    #mainApp{height:100dvh; min-height:0;}
-    #content{min-height:0; padding:18px 28px 104px; overflow-y:auto;}
-    #navbar{width:100%; max-width:1400px;}
-    #advanceFab{width:100%; max-width:1400px;}
-    #topbar{flex-shrink:0;}
-
-    /* The navigation is a permanent dashboard rail at the bottom. */
-    #navbar{position:fixed; left:50%; transform:translateX(-50%); bottom:0; z-index:20;}
-    #advanceFab{position:fixed; left:50%; transform:translateX(-50%); bottom:52px; z-index:19;}
-
-    /* Team selection: formation on the left, the actual player list on the right. */
-    .pitch-wrap{grid-template-columns:minmax(420px,.9fr) minmax(500px,1.1fr); gap:24px; align-items:start;}
-    .pitch-col{max-width:560px; width:100%; justify-self:center;}
-    .pitch-col .pitch{padding-bottom:0; height:min(620px, calc(100dvh - 260px)); min-height:420px;}
-    .bench-col{height:calc(100dvh - 210px); min-height:460px;}
-    .bench-col .list{max-height:none; flex:1; min-height:0; overflow-y:auto;}
-    .bench-col .row{min-height:54px;}
-
-    /* Every screen is allowed to be taller than the viewport; only #content scrolls. */
-    .screen{min-width:0;}
+    #shell{max-width:1400px; min-height:100vh;}
+    #mainApp{min-height:100vh;}
+    #content{min-height:0; padding-left:28px; padding-right:28px; padding-bottom:140px;}
+    #navbar{max-width:1400px;}
+    #advanceFab{max-width:1400px;}
+    .pitch-wrap{display:grid; grid-template-columns:minmax(420px,0.9fr) minmax(500px,1.1fr); gap:24px; align-items:start;}
+    .pitch-col{min-width:0; max-width:600px; width:100%; justify-self:center;}
+    .bench-col{min-width:0; height:calc(100vh - 230px); display:flex; flex-direction:column;}
+    .bench-col .list{flex:1; min-height:0; overflow-y:auto;}
+  }
+  @media (max-width:699px){
+    .pitch-wrap{display:block;}
   }
 
   .window-strip{font-size:11.5px; text-align:center; padding:8px; border-radius:10px; margin-bottom:12px;
@@ -647,7 +627,7 @@
     <div class="club-grid" id="clubGrid"></div>
   </div>
 
-  <div id="mainApp" style="display:none; flex-direction:column; flex:1; min-height:100dvh;">
+  <div id="mainApp" style="display:none; flex-direction:column; flex:1;">
     <div id="topbar">
       <div class="crest" id="topbarCrest"></div>
       <div class="info">
@@ -2704,7 +2684,7 @@ function decodeSave(raw){
 /* =========================================================================
    VERSION, SAVE SLOTS AND DIAGNOSTICS
    ========================================================================= */
-const GAME_VERSION = "3.6.2";
+const GAME_VERSION = "3.6.3";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Three independent careers. Each slot is its own storage key, so you can keep
