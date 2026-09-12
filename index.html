@@ -955,6 +955,11 @@
   #advanceFab.busy .fab-label{opacity:0.6;}
 
   .tac-grid{display:flex; flex-wrap:wrap; gap:7px;}
+  .tac-form-item{display:flex; align-items:stretch; gap:4px;}
+  .tac-form-item .tac-opt{flex:1; min-width:0;}
+  .tac-delete{padding:0 9px; border-radius:var(--r-md); border:1px solid var(--hairline);
+    background:var(--surface); color:var(--text-dim); font-size:16px; font-family:inherit; line-height:1;}
+  .tac-delete:active{background:var(--bad); color:#fff;}
   .tac-opt{padding:9px 13px; border-radius:var(--r-md); border:1px solid var(--hairline);
     background:var(--surface); color:var(--text-dim); font-size:13px; font-family:inherit;}
   .tac-opt.active{background:var(--accent); color:var(--accent-ink); border-color:transparent; font-weight:700;}
@@ -3192,6 +3197,9 @@ function unlockAudio(){
 }
 if(typeof document !== "undefined"){
   document.addEventListener("pointerdown", unlockAudio, {once:true});
+  document.addEventListener("pointerdown", ()=>{
+    if(voiceOn() && voiceSupported()) { try{ window.speechSynthesis.resume(); }catch(e){} }
+  }, {passive:true});
 }
 
 function playTone(freq, duration, delay, type){
@@ -3244,7 +3252,12 @@ function initVoice(){
   if(!voiceSupported()) return;
   const choose = ()=>{
     const all = window.speechSynthesis.getVoices() || [];
-    if(!all.length) return;
+    if(!all.length){
+      // iOS/Safari can expose the list a moment after the page has loaded.
+      // Keep asking briefly instead of locking the game onto a null voice.
+      setTimeout(()=>{ try{ window.speechSynthesis.getVoices(); }catch(e){}; }, 250);
+      return;
+    }
     const english = all.filter(v=> /^en/i.test(v.lang));
     const gb = english.filter(v=> /en[-_]GB/i.test(v.lang));
     const pool = gb.length ? gb : (english.length ? english : all);
@@ -3294,14 +3307,21 @@ try{
 /* Speaking has to keep up with the clock. At speed the queue is dropped rather
    than allowed to trail a minute behind what's on screen, and only the things
    that matter — goals, cards, the whistle — are read at all. */
+let _speechWatch = null;
 function speakLine(text, opts){
-  if(!voiceOn() || !voiceSupported() || !text) return;
   const o = opts || {};
-  try{
-    const synth = window.speechSynthesis;
-    // Never let a backlog build: a line about the 40th minute during the 70th
-    // is worse than silence.
-    if(o.urgent || synth.speaking || synth.pending) synth.cancel();
+  if((!voiceOn() && !o.preview) || !voiceSupported() || !text) return;
+  const speakNow = ()=>{
+    try{
+      const synth = window.speechSynthesis;
+      if(!voiceReady || !VOICE){ try{ initVoice(); }catch(e){} }
+      // Safari can leave the synthesiser paused after an earlier utterance or
+      // after the app returns from the background. Resume before every line.
+      try{ synth.resume(); }catch(e){}
+      // Never let a backlog build: a line about the 40th minute during the 70th
+      // is worse than silence.
+      const wasBusy = !!(synth.speaking || synth.pending);
+      if(o.urgent || wasBusy) synth.cancel();
     /* Punctuation is what stops synthesis sounding robotic — an ellipsis or a
        comma makes the engine breathe. Full stops mid-sentence do the same. */
     /* Synthesis sounds robotic mainly because it is given one long flat clause.
@@ -3323,15 +3343,33 @@ function speakLine(text, opts){
       .replace(/\s{2,}/g, " ")
       .trim()
       .slice(0, 200);
-    const u = new SpeechSynthesisUtterance(spoken);
-    const v = o.second ? (VOICE2 || VOICE) : VOICE;
-    if(v) u.voice = v;
-    u.lang = (v && v.lang) || "en-GB";
-    // Slower by default. 1.05 was a newsreader; a commentator has more air.
-    u.rate = clamp(o.rate || 0.92, 0.55, 1.6);
-    u.pitch = o.pitch || (o.second ? 1.08 : 0.98);
-    u.volume = 1;
-    synth.speak(u);
+      const u = new SpeechSynthesisUtterance(spoken);
+      const v = o.second ? (VOICE2 || VOICE) : VOICE;
+      if(v) u.voice = v;
+      u.lang = (v && v.lang) || "en-GB";
+      // Slower by default. 1.05 was a newsreader; a commentator has more air.
+      u.rate = clamp(o.rate || 0.92, 0.55, 1.6);
+      u.pitch = o.pitch || (o.second ? 1.08 : 0.98);
+      u.volume = 1;
+      // iOS Safari occasionally pauses an utterance mid-line. Keep the engine
+      // awake only while this line is active, then cleanly remove the watchdog.
+      const clearWatch = ()=>{ if(_speechWatch){ clearInterval(_speechWatch); _speechWatch=null; } };
+      u.onend = clearWatch;
+      u.onerror = clearWatch;
+      clearWatch();
+      _speechWatch = setInterval(()=>{
+        try{ if(synth.speaking && synth.paused) synth.resume(); }catch(e){}
+      }, 350);
+      synth.speak(u);
+    }catch(e){}
+  };
+  try{
+    const synth = window.speechSynthesis;
+    const busy = !!(synth.speaking || synth.pending);
+    if(o.urgent || busy) synth.cancel();
+    // If cancel() was needed, give Safari one event-loop turn before speaking.
+    // This prevents the common cancel-then-speak race that produces silence.
+    if(o.urgent || busy) setTimeout(speakNow, 35); else speakNow();
   }catch(e){}
 }
 
@@ -3842,7 +3880,7 @@ const P_KEYS = ["id","clubId","first","last","age","pos","isReal","nat","potenti
   // These were all being assigned and then silently dropped on every reload —
   // form and ambition since the beginning, the last three since they were added.
   "form","ambition","avatarSeed","lastRating","quitting",
-  "csTeam","lastFinedWeek","renewalHandled","lastRequestWeek","seasonsFree","pos2","pos3","pos4","training","agreedToLeave","careerApps","careerGoals",
+  "csTeam","lastFinedWeek","renewalHandled","lastRequestWeek","seasonsFree","pos2","pos3","pos4","training","agreedToLeave","careerApps","careerGoals","lastUnhappyDecisionWeek",
 ];
 
 function packPlayer(p){
@@ -4305,11 +4343,13 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "3.6.3";
+const GAME_VERSION = "3.6.6";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
 const VERSION_NOTES = {
+  "3.6.5": "Custom formations can now be deleted with a visible × button on touchscreens, with confirmation before removal.",
+  "3.6.4": "Leave it now dismisses the unhappy-player action for the current week instead of immediately reappearing.",
   "3.6.3": "Formation builder now fits the pitch, position picker and Save & Close button on one screen — no scrolling needed.",
   "2.0.1": "A scouting brief can now ask for prospects rather than ready-made players, and set both ends of the age range.",
   "3.6.2": "Desktop and laptop space is now used properly: the app fills the window, the team pitch gets a usable share of it, and the squad beside it stays readable.",
@@ -11850,9 +11890,34 @@ function renderTactics(host){
     b.className = "tac-opt"+(t.formation===name?" active":"")+(def.custom?" custom":"");
     b.textContent = name;
     b.onclick = ()=>{ t.formation=name; state.lineup=null; playClickSound(); saveState(); renderSquad(); };
-    // A shape you built can be thrown away again.
     if(def.custom){
-      b.oncontextmenu = e=>{ e.preventDefault(); deleteCustomFormation(name); renderSquad(); };
+      // Deleting a custom shape must be discoverable on touchscreens; the old
+      // desktop-only right-click gesture was effectively invisible on phones.
+      const item = document.createElement("div");
+      item.className = "tac-form-item";
+      const del = document.createElement("button");
+      del.className = "tac-delete";
+      del.type = "button";
+      del.textContent = "×";
+      del.title = "Delete formation";
+      del.setAttribute("aria-label", "Delete formation " + name);
+      del.onclick = e=>{
+        e.preventDefault();
+        e.stopPropagation();
+        const remove = ()=>{
+          deleteCustomFormation(name);
+          playClickSound();
+          renderSquad();
+          toast("Deleted " + name, 2400);
+        };
+        if(window.confirm("Delete custom formation “" + name + "”?")) remove();
+      };
+      // Keep the old right-click behaviour too, for desktop users.
+      b.oncontextmenu = e=>{ e.preventDefault(); del.click(); };
+      item.appendChild(b);
+      item.appendChild(del);
+      fg.appendChild(item);
+      return;
     }
     fg.appendChild(b);
   });
@@ -14769,6 +14834,10 @@ function collectActions(){
               // A promise made is a promise pending — don't ask again every
               // week while he is actually starting.
               && !(p.promisedStart && state.week <= p.promisedStart)
+              // "Leave it" is a real decision: dismiss this complaint for the
+              // current week so the action disappears instead of immediately
+              // being rebuilt by the next render.
+              && p.lastUnhappyDecisionWeek !== (state.season*100 + state.week)
               && !(state.lineup||[]).includes(p.id)
               && !(state.transferRequests||[]).some(r=>r.playerId===p.id))
     .forEach(p=>{
@@ -14803,6 +14872,7 @@ function collectActions(){
       buttons.push({label:"Leave it", danger:true, run:()=>{
         p.morale = clamp((p.morale||6) - 1, 1, 20);
         p.unsettled = true;
+        p.lastUnhappyDecisionWeek = state.season*100 + state.week;
         return `${fullName(p)} was told to get on with it`;
       }});
 
@@ -15261,7 +15331,7 @@ function openVoicePicker(){
       const line = b.dataset.role === "lead"
         ? "Goal... Salech, for Cardiff City."
         : "You cannot defend that. Nothing you can do about it.";
-      speakLine(line, {urgent:true, second: b.dataset.role !== "lead"});
+      speakLine(line, {urgent:true, preview:true, second: b.dataset.role !== "lead"});
       openVoicePicker();
     };
   });
