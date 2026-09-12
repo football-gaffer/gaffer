@@ -955,11 +955,10 @@
   #advanceFab.busy .fab-label{opacity:0.6;}
 
   .tac-grid{display:flex; flex-wrap:wrap; gap:7px;}
-  .tac-form-item{display:flex; align-items:stretch; gap:4px;}
-  .tac-form-item .tac-opt{flex:1; min-width:0;}
-  .tac-delete{padding:0 9px; border-radius:var(--r-md); border:1px solid var(--hairline);
-    background:var(--surface); color:var(--text-dim); font-size:16px; font-family:inherit; line-height:1;}
-  .tac-delete:active{background:var(--bad); color:#fff;}
+  .tac-form-item{display:flex; align-items:stretch; gap:3px;}
+  .tac-form-item .tac-opt{flex:1 1 auto;}
+  .tac-delete{width:30px; min-width:30px; border:1px solid rgba(226,84,74,.35); border-radius:var(--r-md); background:var(--surface); color:var(--bad); font-size:16px; line-height:1; font-weight:800;}
+  .tac-delete:active{transform:scale(.96);}
   .tac-opt{padding:9px 13px; border-radius:var(--r-md); border:1px solid var(--hairline);
     background:var(--surface); color:var(--text-dim); font-size:13px; font-family:inherit;}
   .tac-opt.active{background:var(--accent); color:var(--accent-ink); border-color:transparent; font-weight:700;}
@@ -1013,38 +1012,38 @@
   /* The same pitch as team selection, not a thumbnail of it. Its height comes
      from whatever the sheet has spare and the width follows the proportions,
      so it is as large as the screen allows and never the wrong shape. */
-  /* Formation builder: keep the entire editor in one view. The pitch uses a
-     fixed 3:4 playing-field ratio instead of padding-bottom:132%, leaving room
-     underneath for every position choice and the single Save & Close control. */
-  .pitch.build-pitch{width:min(100%, 620px); aspect-ratio:3 / 4; height:auto;
-    padding-bottom:0; min-height:0; margin:0 auto;}
-  .modal.builder{height:94vh; max-height:94vh; overflow:hidden;}
-  .modal.builder .builder-body{display:flex; flex-direction:column; gap:8px;
-    justify-content:flex-start; flex:1 1 auto; min-height:0; max-height:none !important;
-    overflow:hidden !important;}
+  .pitch.build-pitch{width:min(100%, 320px); aspect-ratio:3 / 4; height:auto; padding-bottom:0; min-height:0;
+    margin:0 auto;}
+  /* The builder is an editor, not a notice — it takes the screen. The pitch was
+     squat because the sheet only claimed the height it happened to need, which
+     left the keeper sitting on top of the centre-backs. */
+  .modal.builder{height:94vh; max-height:94vh;}
+  .modal.builder .builder-body{display:flex; flex-direction:column; gap:10px;
+    justify-content:flex-start; max-height:none; overflow-y:auto;}
   .modal.builder .builder-body > .build-pitch{flex:0 0 auto;}
-  .modal.builder .builder-body > .role-picker{flex:0 0 auto; margin:4px 0 0;}
-  .modal.builder .role-opts{display:grid; grid-template-columns:repeat(7, minmax(0,1fr));
-    gap:5px;}
-  .modal.builder .role-opt{min-width:0; width:100%; padding:7px 2px; font-size:11px;}
-  .modal.builder .role-picker-label{margin-bottom:5px;}
-  .modal.builder #scoutClose{flex:0 0 auto; margin-top:8px !important;}
+  .modal.builder .builder-body > .role-picker{flex:0 0 auto;}
+  .modal.builder .builder-body > .btn-secondary{flex:0 0 auto; margin-top:0;}
+  /* Let the roles wrap to the width instead of forcing eight across, which
+     clipped the last one off the right edge. */
+  .modal.builder .role-opts{display:grid; grid-template-columns:repeat(7, minmax(0,1fr)); gap:5px;}
+  .modal.builder .role-opt{min-width:0; width:100%; padding:7px 2px; font-size:10.5px;}
+  .modal.builder .role-picker-label{margin-bottom:7px;}
 
-  /* Short screens get a smaller field so the complete picker still remains
-     visible without scrolling. */
-  @media (max-height: 760px){
-    .modal.builder .build-pitch{width:min(100%, 470px);}
-    .modal.builder .role-opts{gap:4px;}
-    .modal.builder .role-opt{padding:6px 2px; font-size:10.5px;}
+  /* A short phone cannot give the pitch a full 132% of the sheet's width and
+     still show the picker and save. Narrowing it keeps the proportions and
+     keeps everything on screen. */
+  @media (max-height: 720px){
+    .modal.builder .builder-body > .build-pitch{max-width:244px; width:100%;}
   }
   @media (max-height: 640px){
-    .modal.builder .build-pitch{width:min(100%, 380px);}
-    .modal.builder .role-opt{padding:5px 1px; font-size:10px;}
+    .modal.builder .builder-body > .build-pitch{max-width:216px; width:100%;}
+    .modal.builder .role-opt{padding:6px 2px; font-size:10px;}
   }
 
+  /* With a mouse the sheet is centred and capped, so it needs a real height. */
   @media (pointer: fine) and (min-width: 1024px){
-    .modal.builder{height:auto; max-height:88vh; max-width:620px;}
-    .modal.builder .build-pitch{width:min(100%, 430px);}
+    .modal.builder{height:auto; max-height:88vh; max-width:560px;}
+    .modal.builder .builder-body > .build-pitch{max-width:340px;}
   }
   .build-pitch .pitch-slot{width:46px; height:46px; font-size:11px;}
   .build-pitch .pitch-slot .ps-name{font-size:11px; max-width:44px; font-weight:700;}
@@ -3197,9 +3196,6 @@ function unlockAudio(){
 }
 if(typeof document !== "undefined"){
   document.addEventListener("pointerdown", unlockAudio, {once:true});
-  document.addEventListener("pointerdown", ()=>{
-    if(voiceOn() && voiceSupported()) { try{ window.speechSynthesis.resume(); }catch(e){} }
-  }, {passive:true});
 }
 
 function playTone(freq, duration, delay, type){
@@ -3221,157 +3217,86 @@ function playWhistleSound(){ playTone(1400,0.22,0,"sine"); }
 
 /* =========================================================================
    SPOKEN COMMENTARY
-   Uses the speech synthesis built into the device — the same engine that reads
-   your messages aloud. It is not a bespoke commentator: the voice is whatever
-   the phone has, and quality varies. What it does give is live, offline, free
-   commentary with no network round-trip per line, which a hosted TTS service
-   could not.
+   Primary engine: hosted neural TTS via the site's Netlify Function.
+   Fallback: device speech synthesis if the TTS service is unavailable.
+
+   Safari/iOS can expose only low-quality system voices to Web Speech. The
+   game's main voices therefore come from OpenAI's neural TTS instead, so the
+   same two commentators work on iPhone, iPad and desktop.
    ========================================================================= */
 const VOICE_KEY = "gaffer_voice";
-let VOICE = null;
-let voiceReady = false;
-
-function voiceOn(){
-  try{ return window.localStorage.getItem(VOICE_KEY) === "1"; }catch(e){ return false; }
-}
-function setVoiceOn(on){
-  try{ window.localStorage.setItem(VOICE_KEY, on ? "1" : "0"); }catch(e){}
-  if(!on) stopSpeaking();
-}
-function voiceSupported(){
-  try{ return typeof window.speechSynthesis !== "undefined" && typeof SpeechSynthesisUtterance !== "undefined"; }
-  catch(e){ return false; }
-}
-
-/* Pick something that sounds like a match commentator: British English first,
-   then any English, then whatever exists. Voices load asynchronously on some
-   browsers, hence the event. */
-let VOICE2 = null;
-
+const VOICE_ENGINE_KEY = "gaffer_voice_engine";
+const VOICE_PICK_KEY = "gaffer_neural_voice_pick";
+const TTS_ENDPOINT = "/.netlify/functions/tts";
+const NEURAL_VOICES = {
+  lead: {id:"marin", name:"Marin — Match Commentator", instructions:"You are a live football match commentator for a European football management game. Sound like a real British football commentator: confident, warm, spontaneous and expressive. Build excitement for goals, cards and decisive moments, but do not shout every sentence. Use natural rises and falls, short pauses, and conversational emphasis. Never sound like a GPS, audiobook, or customer-service voice. Read the supplied line exactly as the commentary, without adding words."},
+  colour: {id:"cedar", name:"Cedar — Match Analyst", instructions:"You are the second voice on a live football broadcast. Sound like a natural British football analyst: calm, observant, slightly dry when appropriate, and genuinely engaged in the match. React naturally to the supplied commentary, with human pacing and emphasis. Do not sound synthetic, theatrical, or like a navigation system. Read the supplied line exactly as the commentary, without adding words."}
+};
+let VOICE=null, VOICE2=null, voiceReady=false, _neuralCtx=null, _neuralSource=null, _neuralToken=0;
+const _ttsCache=new Map();
+function voiceOn(){ try{return window.localStorage.getItem(VOICE_KEY)==="1";}catch(e){return false;} }
+function setVoiceOn(on){ try{window.localStorage.setItem(VOICE_KEY,on?"1":"0");}catch(e){} if(!on) stopSpeaking(); }
+function voiceSupported(){ try{return typeof window.speechSynthesis!=="undefined" && typeof SpeechSynthesisUtterance!=="undefined";}catch(e){return false;} }
+function neuralVoiceEnabled(){ try{return window.localStorage.getItem(VOICE_ENGINE_KEY)!=="native";}catch(e){return true;} }
+function setNeuralVoiceEnabled(on){ try{window.localStorage.setItem(VOICE_ENGINE_KEY,on?"neural":"native");}catch(e){} if(!on) stopSpeaking(); }
 function initVoice(){
-  if(!voiceSupported()) return;
-  const choose = ()=>{
-    const all = window.speechSynthesis.getVoices() || [];
-    if(!all.length){
-      // iOS/Safari can expose the list a moment after the page has loaded.
-      // Keep asking briefly instead of locking the game onto a null voice.
-      setTimeout(()=>{ try{ window.speechSynthesis.getVoices(); }catch(e){}; }, 250);
-      return;
-    }
-    const english = all.filter(v=> /^en/i.test(v.lang));
-    const gb = english.filter(v=> /en[-_]GB/i.test(v.lang));
-    const pool = gb.length ? gb : (english.length ? english : all);
-    /* A male lead and a female summariser where the device has both — two
-       clearly different people is what makes it sound like a conversation
-       rather than one machine reading a script. */
-    /* Every voice iOS ships by default is "compact" quality — the flat, clipped
-       one. Enhanced and Premium versions exist but have to be downloaded by
-       hand in Settings, and they sound like a different product. Where they are
-       present, always take them. */
-    const better = v=> /enhanced|premium|natural|neural|siri/i.test(v.name);
-    const rank = v=> (better(v) ? 0 : 1);
-    const sorted = pool.slice().sort((a,b)=> rank(a) - rank(b));
-
-    const MALE = /daniel|arthur|oliver|george|james|male|alex$|aaron|fred|rishi/i;
-    const FEMALE = /serena|kate|martha|samantha|karen|moira|fiona|susan|emily|female|nicky|ava|zoe/i;
-
-    // Anything the manager has chosen by hand wins over all of it.
-    const saved = (()=>{ try{ return JSON.parse(window.localStorage.getItem("gaffer_voice_pick") || "null"); }
-                         catch(e){ return null; } })();
-    const byName = n=> n ? all.find(v=> v.name === n) : null;
-
-    VOICE  = byName(saved && saved.lead)
-          || sorted.find(v=> MALE.test(v.name)) || sorted[0];
-    VOICE2 = byName(saved && saved.colour)
-          || sorted.find(v=> FEMALE.test(v.name) && v !== VOICE)
-          || sorted.find(v=> v !== VOICE) || VOICE;
-    voiceReady = true;
-  };
-  choose();
-  try{ window.speechSynthesis.onvoiceschanged = choose; }catch(e){}
+  let pick=null; try{pick=JSON.parse(window.localStorage.getItem(VOICE_PICK_KEY)||"null");}catch(e){}
+  VOICE=NEURAL_VOICES.lead; VOICE2=NEURAL_VOICES.colour;
+  if(pick && pick.lead===NEURAL_VOICES.colour.id){VOICE=NEURAL_VOICES.colour; VOICE2=NEURAL_VOICES.lead;}
+  voiceReady=true;
 }
-
-function stopSpeaking(){
-  try{ window.speechSynthesis.cancel(); }catch(e){}
-}
-
-/* Known Safari bug: if the app is backgrounded while speaking, the synthesiser
-   jams and refuses to speak again until the page is reloaded. Cancelling on
-   the way out avoids it entirely. */
-try{
-  document.addEventListener("visibilitychange", ()=>{
-    if(document.visibilityState !== "visible") stopSpeaking();
-  });
-}catch(e){}
-
-/* Speaking has to keep up with the clock. At speed the queue is dropped rather
-   than allowed to trail a minute behind what's on screen, and only the things
-   that matter — goals, cards, the whistle — are read at all. */
-let _speechWatch = null;
-function speakLine(text, opts){
-  const o = opts || {};
-  if((!voiceOn() && !o.preview) || !voiceSupported() || !text) return;
-  const speakNow = ()=>{
-    try{
-      const synth = window.speechSynthesis;
-      if(!voiceReady || !VOICE){ try{ initVoice(); }catch(e){} }
-      // Safari can leave the synthesiser paused after an earlier utterance or
-      // after the app returns from the background. Resume before every line.
-      try{ synth.resume(); }catch(e){}
-      // Never let a backlog build: a line about the 40th minute during the 70th
-      // is worse than silence.
-      const wasBusy = !!(synth.speaking || synth.pending);
-      if(o.urgent || wasBusy) synth.cancel();
-    /* Punctuation is what stops synthesis sounding robotic — an ellipsis or a
-       comma makes the engine breathe. Full stops mid-sentence do the same. */
-    /* Synthesis sounds robotic mainly because it is given one long flat clause.
-       Breaking it into short ones with real punctuation is what produces the
-       rise and fall — commas for a beat, ellipses for a held pause, full stops
-       to reset the pitch. Numbers and abbreviations are spelled the way they
-       are said. */
-    const spoken = String(text)
-      .replace(/[·—–]/g, ",")
-      .replace(/\bGOAL\b/gi, "Goal... ")
-      .replace(/ - /g, ", ")
-      .replace(/(\d+)'/g, "$1 minutes")
-      .replace(/(\d)\s*[-–]\s*(\d)/g, "$1, $2")     // "2-1" reads as "two, one"
-      .replace(/\bv\b/gi, "against")
-      .replace(/\bFT\b/g, "Full time")
-      .replace(/!\s*/g, "! ")
-      .replace(/\.\.\.\s*,\s*/g, "... ")     // "Goal... , Salech" -> "Goal... Salech"
-      .replace(/\s+([,.])/g, "$1")
-      .replace(/\s{2,}/g, " ")
-      .trim()
-      .slice(0, 200);
-      const u = new SpeechSynthesisUtterance(spoken);
-      const v = o.second ? (VOICE2 || VOICE) : VOICE;
-      if(v) u.voice = v;
-      u.lang = (v && v.lang) || "en-GB";
-      // Slower by default. 1.05 was a newsreader; a commentator has more air.
-      u.rate = clamp(o.rate || 0.92, 0.55, 1.6);
-      u.pitch = o.pitch || (o.second ? 1.08 : 0.98);
-      u.volume = 1;
-      // iOS Safari occasionally pauses an utterance mid-line. Keep the engine
-      // awake only while this line is active, then cleanly remove the watchdog.
-      const clearWatch = ()=>{ if(_speechWatch){ clearInterval(_speechWatch); _speechWatch=null; } };
-      u.onend = clearWatch;
-      u.onerror = clearWatch;
-      clearWatch();
-      _speechWatch = setInterval(()=>{
-        try{ if(synth.speaking && synth.paused) synth.resume(); }catch(e){}
-      }, 350);
-      synth.speak(u);
-    }catch(e){}
-  };
+function ensureNeuralAudioContext(){
   try{
-    const synth = window.speechSynthesis;
-    const busy = !!(synth.speaking || synth.pending);
-    if(o.urgent || busy) synth.cancel();
-    // If cancel() was needed, give Safari one event-loop turn before speaking.
-    // This prevents the common cancel-then-speak race that produces silence.
-    if(o.urgent || busy) setTimeout(speakNow, 35); else speakNow();
+    if(!_neuralCtx){ const C=window.AudioContext||window.webkitAudioContext; if(!C) return null; _neuralCtx=new C(); }
+    if(_neuralCtx.state === "suspended") _neuralCtx.resume().catch(()=>{});
+    return _neuralCtx;
+  }catch(e){ return null; }
+}
+function stopSpeaking(){
+  _neuralToken++;
+  try{if(_neuralSource){_neuralSource.stop();_neuralSource.disconnect();}}catch(e){}
+  _neuralSource=null;
+  try{window.speechSynthesis.cancel();}catch(e){}
+}
+function spokenCommentaryText(text){
+  return String(text).replace(/[·—–]/g,",").replace(/\bGOAL\b/gi,"Goal... ").replace(/ - /g,", ")
+    .replace(/(\d+)'/g,"$1 minutes").replace(/(\d)\s*[-–]\s*(\d)/g,"$1, $2")
+    .replace(/\bv\b/gi,"against").replace(/\bFT\b/g,"Full time").replace(/!\s*/g,"! ")
+    .replace(/\.\.\.\s*,\s*/g,"... ").replace(/\s+([,.])/g,"$1").replace(/\s{2,}/g," ").trim().slice(0,500);
+}
+async function speakNeuralLine(text,opts){
+  const o=opts||{}, spoken=spokenCommentaryText(text); if(!spoken) return false;
+  const ctx=ensureNeuralAudioContext(); if(!ctx) throw new Error("No Web Audio support");
+  const token=++_neuralToken;
+  try{if(_neuralSource){_neuralSource.stop();_neuralSource.disconnect();}}catch(e){} _neuralSource=null;
+  const role=o.second?"colour":"lead", v=NEURAL_VOICES[role]||NEURAL_VOICES.lead, key=v.id+"|"+spoken;
+  let buffer=_ttsCache.get(key);
+  if(!buffer){
+    const res=await fetch(TTS_ENDPOINT,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:spoken,voice:v.id,instructions:v.instructions,speed:o.rate||(o.second?0.96:1.02)})});
+    if(!res.ok) throw new Error("TTS "+res.status);
+    const data=await res.arrayBuffer(); if(!data.byteLength) throw new Error("Empty TTS audio");
+    buffer=await ctx.decodeAudioData(data); _ttsCache.set(key,buffer);
+  }
+  if(token!==_neuralToken) return true;
+  if(ctx.state === "suspended") await ctx.resume();
+  const source=ctx.createBufferSource(); source.buffer=buffer; source.connect(ctx.destination); _neuralSource=source;
+  source.onended=()=>{if(_neuralSource===source)_neuralSource=null;};
+  source.start(0); return true;
+}
+function speakNativeFallback(text,opts){
+  const o=opts||{}; if(!voiceSupported()) return;
+  try{
+    const synth=window.speechSynthesis, spoken=spokenCommentaryText(text).slice(0,200); if(!spoken) return;
+    if(o.urgent||synth.speaking||synth.pending) synth.cancel();
+    const u=new SpeechSynthesisUtterance(spoken); u.lang="en-GB"; u.rate=clamp(o.rate||0.92,0.55,1.6); u.pitch=o.pitch||(o.second?1.08:0.98); u.volume=1; synth.resume(); synth.speak(u);
   }catch(e){}
 }
+function speakLine(text,opts){
+  const o=opts||{}; if((!voiceOn()&&!o.preview)||!text) return; if(!voiceReady) initVoice();
+  if(neuralVoiceEnabled()) speakNeuralLine(text,o).catch(()=>speakNativeFallback(text,o)); else speakNativeFallback(text,o);
+}
+try{document.addEventListener("visibilitychange",()=>{if(document.visibilityState!=="visible") stopSpeaking();});}catch(e){}
+try{document.addEventListener("pointerdown",()=>{ensureNeuralAudioContext();},{passive:true});}catch(e){}
 
 /* Spoken lines are written to be heard, not read. No minute prefix, no icons,
    no score in digits mid-sentence — a commentator says "two one", and the
@@ -3880,7 +3805,7 @@ const P_KEYS = ["id","clubId","first","last","age","pos","isReal","nat","potenti
   // These were all being assigned and then silently dropped on every reload —
   // form and ambition since the beginning, the last three since they were added.
   "form","ambition","avatarSeed","lastRating","quitting",
-  "csTeam","lastFinedWeek","renewalHandled","lastRequestWeek","seasonsFree","pos2","pos3","pos4","training","agreedToLeave","careerApps","careerGoals","lastUnhappyDecisionWeek",
+  "csTeam","lastFinedWeek","renewalHandled","lastRequestWeek","lastUnhappyDecisionWeek","seasonsFree","pos2","pos3","pos4","training","agreedToLeave","careerApps","careerGoals",
 ];
 
 function packPlayer(p){
@@ -4343,11 +4268,13 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "3.6.6";
+const GAME_VERSION = "3.7.0";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
 const VERSION_NOTES = {
+  "3.7.0": "Spoken commentary now uses two natural neural AI broadcast voices (Marin and Cedar) through a secure Netlify Function, with device speech kept as a fallback.",
+  "3.6.6": "Commentary speech was hardened against iPhone Safari pause/cancel issues.",
   "3.6.5": "Custom formations can now be deleted with a visible × button on touchscreens, with confirmation before removal.",
   "3.6.4": "Leave it now dismisses the unhappy-player action for the current week instead of immediately reappearing.",
   "3.6.3": "Formation builder now fits the pitch, position picker and Save & Close button on one screen — no scrolling needed.",
@@ -11886,40 +11813,34 @@ function renderTactics(host){
   const fg = document.getElementById("formGrid");
   Object.keys(allFormations()).forEach(name=>{
     const def = formationDef(name);
-    const b = document.createElement("button");
-    b.className = "tac-opt"+(t.formation===name?" active":"")+(def.custom?" custom":"");
-    b.textContent = name;
-    b.onclick = ()=>{ t.formation=name; state.lineup=null; playClickSound(); saveState(); renderSquad(); };
     if(def.custom){
-      // Deleting a custom shape must be discoverable on touchscreens; the old
-      // desktop-only right-click gesture was effectively invisible on phones.
       const item = document.createElement("div");
       item.className = "tac-form-item";
+      const b = document.createElement("button");
+      b.className = "tac-opt"+(t.formation===name?" active":"")+" custom";
+      b.textContent = name;
+      b.onclick = ()=>{ t.formation=name; state.lineup=null; playClickSound(); saveState(); renderSquad(); };
+      b.oncontextmenu = e=>{ e.preventDefault(); deleteCustomFormation(name); renderSquad(); };
       const del = document.createElement("button");
       del.className = "tac-delete";
       del.type = "button";
+      del.title = "Delete custom formation";
+      del.setAttribute("aria-label", "Delete custom formation " + name);
       del.textContent = "×";
-      del.title = "Delete formation";
-      del.setAttribute("aria-label", "Delete formation " + name);
       del.onclick = e=>{
-        e.preventDefault();
         e.stopPropagation();
-        const remove = ()=>{
-          deleteCustomFormation(name);
-          playClickSound();
-          renderSquad();
-          toast("Deleted " + name, 2400);
-        };
-        if(window.confirm("Delete custom formation “" + name + "”?")) remove();
+        if(window.confirm("Delete custom formation “" + name + "”?")){
+          deleteCustomFormation(name); playClickSound(); renderSquad(); toast("Deleted " + name, 2400);
+        }
       };
-      // Keep the old right-click behaviour too, for desktop users.
-      b.oncontextmenu = e=>{ e.preventDefault(); del.click(); };
-      item.appendChild(b);
-      item.appendChild(del);
-      fg.appendChild(item);
-      return;
+      item.appendChild(b); item.appendChild(del); fg.appendChild(item);
+    } else {
+      const b = document.createElement("button");
+      b.className = "tac-opt"+(t.formation===name?" active":"");
+      b.textContent = name;
+      b.onclick = ()=>{ t.formation=name; state.lineup=null; playClickSound(); saveState(); renderSquad(); };
+      fg.appendChild(b);
     }
-    fg.appendChild(b);
   });
   const nb = document.createElement("button");
   nb.className = "tac-opt new-shape";
@@ -14367,12 +14288,11 @@ function hideAllTopScreens(){
 
 /* Asked once, before a ball is kicked, and never again. */
 function chooseDifficulty(club){
+  resetScoutFooter();
   const sheet0 = document.getElementById("scoutModal");
   if(sheet0) sheet0.classList.remove("fit", "builder");
   const host0 = document.getElementById("scoutBody");
   if(host0) host0.classList.remove("fit-grow", "builder-body");
-  const footer0 = document.getElementById("scoutClose");
-  if(footer0){ footer0.textContent = "Close"; footer0.disabled = false; footer0.onclick = ()=>{ playClickSound(); document.getElementById("scoutBackdrop").classList.remove("open"); }; }
   const host = document.getElementById("scoutBody");
   const sub = document.getElementById("scoutSub");
   if(!host){ startCareerWith(club, "standard"); return; }
@@ -14831,13 +14751,10 @@ function collectActions(){
     });
 
   sq.filter(p=> (p.morale||12) <= 6 && canComplain(p) && !p.loanedOutTo && !p.loanedFrom
+              && p.lastUnhappyDecisionWeek !== (state.season*100 + state.week)
               // A promise made is a promise pending — don't ask again every
               // week while he is actually starting.
               && !(p.promisedStart && state.week <= p.promisedStart)
-              // "Leave it" is a real decision: dismiss this complaint for the
-              // current week so the action disappears instead of immediately
-              // being rebuilt by the next render.
-              && p.lastUnhappyDecisionWeek !== (state.season*100 + state.week)
               && !(state.lineup||[]).includes(p.id)
               && !(state.transferRequests||[]).some(r=>r.playerId===p.id))
     .forEach(p=>{
@@ -15136,87 +15053,74 @@ let scoutBrief = {position:"ANY", minAge:16, maxAge:34, tier:"ANY",
    exactly like a built-in formation everywhere else. */
 let builderRoles = ["GK","LB","CB","CB","RB","CM","CM","LM","RM","ST","ST"];
 
+function resetScoutFooter(){
+  const f=document.getElementById("scoutClose");
+  if(!f) return;
+  f.textContent="Close";
+  f.disabled=false;
+  f.onclick=()=>{ playClickSound(); document.getElementById("scoutBackdrop").classList.remove("open"); };
+}
+
 function openFormationBuilder(){
   const host = document.getElementById("scoutBody");
   const sub = document.getElementById("scoutSub");
   if(!host) return;
   document.querySelector("#scoutBackdrop h2").textContent = "Build a shape";
-  /* The sheet is a column for the duration: the pitch takes what is left after
-     the picker and the save button, which stay in view. Previously the pitch
-     was sized from its own width, pushed everything below the fold and left
-     only the close button reachable. */
   const sheet = document.getElementById("scoutModal");
   if(sheet) sheet.classList.add("fit", "builder");
   host.classList.add("fit-grow", "builder-body");
-
   const built = makeCustomFormation(builderRoles);
-  sub.textContent = built.ok ? built.name + " · " + builderRoles.filter(r=>r!=="GK").length + " outfield"
-                             : built.reason;
+  sub.textContent = built.ok ? built.name + " · " + builderRoles.filter(r=>r!=="GK").length + " outfield" : built.reason;
   host.innerHTML = "";
 
   const preview = document.createElement("div");
   preview.className = "pitch build-pitch";
-  preview.style.margin = "0 auto 12px";
+  preview.style.margin = "0 auto 8px";
   const layout = layoutFromRoles(builderRoles);
   preview.innerHTML = `<div class="pitch-lines"></div>` + layout.map((pos,i)=>
-    `<button class="pitch-slot" data-b="${i}" style="left:${pos[0]}%; top:${pos[1]}%;">
-       <span class="ps-name">${builderRoles[i]}</span>
-     </button>`).join("");
+    `<button class="pitch-slot" data-b="${i}" style="left:${pos[0]}%; top:${pos[1]}%;"><span class="ps-name">${builderRoles[i]}</span></button>`).join("");
   host.appendChild(preview);
 
   const picker = document.createElement("div");
   picker.className = "role-picker";
-  picker.innerHTML = `<div class="role-picker-label">Tap a shirt, then choose its role</div>
-    <div class="role-opts">${Object.keys(POSITIONS).map(r=>
-      `<button class="role-opt" data-set="${r}">${r}</button>`).join("")}</div>`;
+  picker.innerHTML = `<div class="role-picker-label">Tap a shirt, then choose its role</div><div class="role-opts">${Object.keys(POSITIONS).map(r=>`<button class="role-opt" data-set="${r}">${r}</button>`).join("")}</div>`;
   host.appendChild(picker);
 
-  /* Reuse the sheet footer so there is exactly one action: Save & Close. */
-  const footer = document.getElementById("scoutClose");
+  const footer=document.getElementById("scoutClose");
   if(footer){
-    footer.textContent = built.ok ? "Save & Close" : "Close";
-    footer.disabled = !built.ok;
-    footer.onclick = ()=>{
-      if(!built.ok) return;
-      const r = saveCustomFormation(builderRoles.slice());
+    footer.textContent="Save & Close";
+    footer.disabled=!built.ok;
+    footer.onclick=()=>{
+      if(!built.ok){ toast(built.reason || "Choose valid positions first", 2600); return; }
+      const r=saveCustomFormation(builderRoles.slice());
       if(r.ok){
-        state.tactics.formation = r.name;
-        state.lineup = null;
-        saveState(true);
+        state.tactics.formation=r.name; state.lineup=null; saveState(true);
+        resetScoutFooter();
         document.getElementById("scoutBackdrop").classList.remove("open");
-        toast("Saved " + r.name, 3000);
-        renderSquad();
+        toast("Saved " + r.name, 3000); renderSquad();
       } else toast(r.reason, 3400);
     };
   }
 
-  let picked = null;
-  host.querySelectorAll("[data-b]").forEach(b=>{
-    b.onclick = ()=>{
-      picked = +b.dataset.b;
-      host.querySelectorAll("[data-b]").forEach(x=> x.classList.remove("selected"));
-      b.classList.add("selected");
-    };
+  let picked=null;
+  host.querySelectorAll("[data-b]").forEach(b=>b.onclick=()=>{
+    picked=+b.dataset.b;
+    host.querySelectorAll("[data-b]").forEach(x=>x.classList.remove("selected"));
+    b.classList.add("selected");
   });
-  host.querySelectorAll("[data-set]").forEach(b=>{
-    b.onclick = ()=>{
-      if(picked === null){ toast("Tap a shirt first", 2200); return; }
-      builderRoles[picked] = b.dataset.set;
-      playClickSound();
-      openFormationBuilder();
-    };
+  host.querySelectorAll("[data-set]").forEach(b=>b.onclick=()=>{
+    if(picked===null){ toast("Tap a shirt first",2200); return; }
+    builderRoles[picked]=b.dataset.set; playClickSound(); openFormationBuilder();
   });
-
   document.getElementById("scoutBackdrop").classList.add("open");
 }
 
 function openTrainingPicker(p){
+  resetScoutFooter();
   const sheet0 = document.getElementById("scoutModal");
   if(sheet0) sheet0.classList.remove("fit", "builder");
   const host0 = document.getElementById("scoutBody");
   if(host0) host0.classList.remove("fit-grow", "builder-body");
-  const footer0 = document.getElementById("scoutClose");
-  if(footer0){ footer0.textContent = "Close"; footer0.disabled = false; footer0.onclick = ()=>{ playClickSound(); document.getElementById("scoutBackdrop").classList.remove("open"); }; }
   const host = document.getElementById("scoutBody");
   const sub = document.getElementById("scoutSub");
   if(!host) return;
@@ -15267,78 +15171,30 @@ function openTrainingPicker(p){
    rather than a fault here — so say so plainly instead of showing an empty
    list and letting the manager wonder. */
 function openVoicePicker(){
-  const sheet0 = document.getElementById("scoutModal");
-  if(sheet0) sheet0.classList.remove("fit", "builder");
-  const host0 = document.getElementById("scoutBody");
-  if(host0) host0.classList.remove("fit-grow", "builder-body");
-  const footer0 = document.getElementById("scoutClose");
-  if(footer0){ footer0.textContent = "Close"; footer0.disabled = false; footer0.onclick = ()=>{ playClickSound(); document.getElementById("scoutBackdrop").classList.remove("open"); }; }
-  const host = document.getElementById("scoutBody");
-  const sub = document.getElementById("scoutSub");
-  if(!host) return;
-  document.querySelector("#scoutBackdrop h2").textContent = "Commentary Voices";
-
-  let all = [];
-  try{ all = (window.speechSynthesis.getVoices() || []).filter(v=> /^en/i.test(v.lang)); }catch(e){}
-
-  const better = v=> /enhanced|premium|natural|neural|siri/i.test(v.name);
-  const anyGood = all.some(better);
-  sub.textContent = all.length
-    ? all.length + " English voices on this device" + (anyGood ? "" : " — all basic quality")
-    : "This browser won't list its voices";
-
-  if(!all.length){
-    host.innerHTML = `<div class="scout-row"><span class="sr-body">
-      <span class="sr-title">No voices to choose from</span>
-      <span class="sr-sub">Safari does not always expose its voice list to a web page.
-        Commentary will still work — it just uses whichever voice the system picks.</span>
-    </span></div>`;
-    document.getElementById("scoutBackdrop").classList.add("open");
-    return;
-  }
-
-  const cur = {lead: VOICE && VOICE.name, colour: VOICE2 && VOICE2.name};
-  const list = role=> all.map(v=>
-    `<button class="act-row${cur[role]===v.name?" chosen":""}" data-role="${role}" data-voice="${v.name}">
-       <span class="act-icon">${better(v) ? "\u2605" : "\u00B7"}</span>
-       <span class="act-text">
-         <span class="act-title">${v.name}</span>
-         <span class="act-sub">${v.lang}${better(v) ? " · higher quality" : ""}${
-           cur[role]===v.name ? " · in use" : ""}</span>
-       </span><span class="act-chev">\u25B6</span>
-     </button>`).join("");
-
-  host.innerHTML =
-    `<div class="act-group">Commentator</div>${list("lead")}
-     <div class="act-group">Summariser</div>${list("colour")}` +
-    (anyGood ? "" : `<div class="scout-row"><span class="sr-body">
-       <span class="sr-title">Everything here is basic quality</span>
-       <span class="sr-sub">iPhones ship only compact voices. Enhanced ones are a free
-         download in Settings &rsaquo; Accessibility &rsaquo; Spoken Content &rsaquo; Voices &rsaquo; English,
-         and sound far better. They are around 100MB each.</span>
-     </span></div>`);
-
-  host.querySelectorAll("[data-voice]").forEach(b=>{
-    b.onclick = ()=>{
-      const v = all.find(x=> x.name === b.dataset.voice);
-      if(!v) return;
-      if(b.dataset.role === "lead") VOICE = v; else VOICE2 = v;
-      try{
-        window.localStorage.setItem("gaffer_voice_pick",
-          JSON.stringify({lead: VOICE && VOICE.name, colour: VOICE2 && VOICE2.name}));
-      }catch(e){}
-      // Hear it immediately — that's the whole point of a picker.
-      const line = b.dataset.role === "lead"
-        ? "Goal... Salech, for Cardiff City."
-        : "You cannot defend that. Nothing you can do about it.";
-      speakLine(line, {urgent:true, preview:true, second: b.dataset.role !== "lead"});
-      openVoicePicker();
-    };
+  resetScoutFooter();
+  const sheet0=document.getElementById("scoutModal"); if(sheet0) sheet0.classList.remove("fit","builder");
+  const host0=document.getElementById("scoutBody"); if(host0) host0.classList.remove("fit-grow","builder-body");
+  const host=document.getElementById("scoutBody"), sub=document.getElementById("scoutSub"); if(!host) return;
+  document.querySelector("#scoutBackdrop h2").textContent="Commentary Voices"; initVoice();
+  const neural=neuralVoiceEnabled();
+  sub.textContent=neural?"Natural AI voices · same voices on every device":"Device voices · may sound robotic on iPhone";
+  const choices=[NEURAL_VOICES.lead,NEURAL_VOICES.colour];
+  const curLead=VOICE&&VOICE.id, curSecond=VOICE2&&VOICE2.id;
+  const card=(v,role)=>`<button class="act-row${(role==="lead"?curLead:curSecond)===v.id?" chosen":""}" data-role="${role}" data-neural="${v.id}"><span class="act-icon">${role==="lead"?"●":"◆"}</span><span class="act-text"><span class="act-title">${v.name}</span><span class="act-sub">${role==="lead"?"Main commentator":"Second commentator"}${(role==="lead"?curLead:curSecond)===v.id?" · in use":""}</span></span><span class="act-chev">▶</span></button>`;
+  host.innerHTML=`<div class="act-group">Natural AI voices</div>${card(choices[0],"lead")}${card(choices[1],"colour")}<div class="scout-row"><span class="sr-body"><span class="sr-title">Built for matchday</span><span class="sr-sub">Neural speech is generated by OpenAI, with different broadcast directions for the commentator and analyst. Device speech is only the fallback.</span></span></div><div class="act-group">Engine</div><button class="act-row${neural?" chosen":""}" data-engine="neural"><span class="act-icon">★</span><span class="act-text"><span class="act-title">Natural AI — recommended</span><span class="act-sub">Marin + Cedar · consistent across iPhone, iPad and desktop</span></span><span class="act-chev">▶</span></button><button class="act-row${!neural?" chosen":""}" data-engine="native"><span class="act-icon">·</span><span class="act-text"><span class="act-title">Device voices — fallback</span><span class="act-sub">Uses Safari/iOS speech synthesis</span></span><span class="act-chev">▶</span></button>`;
+  host.querySelectorAll("[data-neural]").forEach(b=>b.onclick=()=>{
+    if(b.dataset.neural===NEURAL_VOICES.lead.id){VOICE=NEURAL_VOICES.lead;VOICE2=NEURAL_VOICES.colour;} else {VOICE2=NEURAL_VOICES.colour;}
+    try{window.localStorage.setItem(VOICE_PICK_KEY,JSON.stringify({lead:VOICE&&VOICE.id,colour:VOICE2&&VOICE2.id}));}catch(e){}
+    setNeuralVoiceEnabled(true);
+    speakLine(b.dataset.role==="lead"?"Goal... Salech, for Cardiff City. What a finish!":"You cannot defend that. Nothing you can do about it.",{urgent:true,preview:true,second:b.dataset.role!=="lead"});
+    openVoicePicker();
   });
+  host.querySelectorAll("[data-engine]").forEach(b=>b.onclick=()=>{setNeuralVoiceEnabled(b.dataset.engine==="neural");openVoicePicker();});
   document.getElementById("scoutBackdrop").classList.add("open");
 }
 
 function openScouting(){
+  resetScoutFooter();
   const sheet0 = document.getElementById("scoutModal");
   if(sheet0) sheet0.classList.remove("fit", "builder");
   const host0 = document.getElementById("scoutBody");
@@ -17053,8 +16909,9 @@ function renderSettingsScreen(onBack){
   const voiceRow = document.createElement("div");
   voiceRow.className = "setting-row";
   voiceRow.style.cursor = "pointer";
-  const lead = (VOICE && VOICE.name) || "system default";
-  const col  = (VOICE2 && VOICE2.name) || "system default";
+  initVoice();
+  const lead = (VOICE && VOICE.name) || "Marin — Match Commentator";
+  const col  = (VOICE2 && VOICE2.name) || "Cedar — Match Analyst";
   voiceRow.innerHTML = `<div>
       <div class="label" style="font-size:13px;">Commentary voices</div>
       <div class="sub">${lead === col ? lead : lead + " and " + col}</div>
@@ -17334,7 +17191,7 @@ document.getElementById("scoutClose").onclick = ()=>{
   document.getElementById("scoutBackdrop").classList.remove("open");
 };
 document.getElementById("scoutBackdrop").addEventListener("click", e=>{
-  if(e.target.id === "scoutBackdrop") e.currentTarget.classList.remove("open");
+  if(e.target.id === "scoutBackdrop"){ resetScoutFooter(); e.currentTarget.classList.remove("open"); }
 });
 
 document.getElementById("diagClose").onclick = ()=>{
