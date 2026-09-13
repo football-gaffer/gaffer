@@ -4282,11 +4282,13 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "3.8.0";
+const GAME_VERSION = "3.8.2";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
 const VERSION_NOTES = {
+  "3.8.2": "Scouting now belongs to clubs as well as the manager: every club starts with its own recruitment reports, those reports are available when you arrive, your personal reports travel with you between jobs, and AI clubs recruit from their own shortlists.",
+  "3.8.1": "Changing clubs now resets the old club's transfer filters and scouting assignments, so a new job starts with a fresh recruitment department.",
   "3.8.0": "Transfer sorting, transfer pricing, offers, custom formations, sponsorships and long-save market continuity have been rebuilt and checked.",
   "3.7.0": "Spoken commentary now uses two natural neural AI broadcast voices (Marin and Cedar) through a secure Netlify Function, with device speech kept as a fallback.",
   "3.7.1": "GitHub Pages edition: authored commentary is pre-generated as natural Marin and Cedar audio by GitHub Actions; no runtime API key is exposed.",
@@ -4778,6 +4780,7 @@ function newCareer(clubId){
   assignContracts();
   promptCaptainSelection();
   runMarketRefresh();      // clubs list surplus players and release others from day one
+  ensureClubScoutingNetwork(true); // every club arrives with an existing recruitment database
   setSeasonBudgets();
   initCoefficients();
   ensureKeepers();          // whatever built these squads, they all need a keeper
@@ -5046,6 +5049,7 @@ function runSeasonRollover(){
   try{ updateClubRecords(); }catch(e){ reportError("REC-01", e, "club records"); }
   replenishAISquads();
   runMarketRefresh();
+  try{ refreshClubScouting(); }catch(e){ reportError("SCT-03", e, "seasonal club scouting"); }
   const loanedOut = processOutgoingLoans();
   state.offers = [];
   const aiMoves = runAITransferWindow();
@@ -5427,10 +5431,29 @@ function runAITransferWindow(){
     if(!squad || squad.length===0) return;
     const buyerAvg = squad.reduce((s,p)=>s+p.overall,0)/squad.length;
 
-    // Look at a random sample rather than all 5,000 players — keeps rollover fast
-    // and produces pleasantly unpredictable markets.
+    // Start with the players this club has actually had its scouts watching.
+    // That makes the AI recruitment department meaningful: clubs build a
+    // shortlist before the transfer window and then shop from it. A random
+    // sample remains as a fallback so the market never becomes predictable.
     const candidates = [];
-    for(let i=0;i<140;i++){
+    const seenTargets = new Set();
+    const reportIds = Object.keys(clubScoutingEntry(buyer.id).reports || {});
+    reportIds.slice().sort(()=>Math.random()-0.5).slice(0,80).forEach(pid=>{
+      const target = findPlayerAnywhere(pid);
+      if(target && target.clubId !== buyer.id && target.clubId !== state.clubId && !target.loanedFrom){
+        seenTargets.add(target.id);
+        const seller = clubById(target.clubId);
+        if(!seller) return;
+        const upgrade = target.overall - buyerAvg;
+        const prospect = (target.potential||target.overall) - buyerAvg;
+        if(upgrade < 0.8 && !(target.age<=21 && prospect >= 2.5)) return;
+        const price = playerAskingPrice(target, seller.tier || seller.leagueId);
+        if(price > budget) return;
+        const reportLevel = clubScoutingEntry(buyer.id).reports[pid].level || 1;
+        candidates.push({target, seller, price, score: upgrade*2 + prospect + reportLevel*0.8 + (target.listed?1.5:0)});
+      }
+    });
+    for(let i=0;i<80;i++){
       const sellerId = pick(Object.keys(state.squads));
       if(sellerId===buyer.id || sellerId===state.clubId) continue; // never sells the user's players out from under them
       const seller = CLUB_META[sellerId];
@@ -5438,7 +5461,7 @@ function runAITransferWindow(){
       const sq = state.squads[sellerId];
       if(!sq || sq.length<=16) continue; // don't gut a thin squad
       const target = pick(sq);
-      if(!target || target.loanedFrom) continue;   // can't sell a player you don't own
+      if(!target || target.loanedFrom || seenTargets.has(target.id)) continue;
       // Interested in players better than their average, or young with big potential.
       const upgrade = target.overall - buyerAvg;
       const prospect = (target.potential||target.overall) - buyerAvg;
@@ -6157,6 +6180,28 @@ function acceptJob(clubId){
   state.sackPressure = 0;
   state.offers = [];
   state.transferRequests = [];
+
+  // A manager changing clubs gets a fresh recruitment department. Transfer
+  // filters and scouting assignments belong to the old club and must not follow
+  // him into the new job. Keeping them here made a new club open with
+  // "Scouted only" / "Affordable only" still switched on, while the old club's
+  // scouts remained busy — producing the misleading 0-player market shown on
+  // the transfer screen after a sacking.
+  transferFilters = { interestedOnly:false, query:"", position:"ALL", tier:"ALL", sort:"rating_desc",
+    affordableOnly:false, scoutedOnly:false, mode:"all", minAge:16, maxAge:99, minRating:40, maxRating:99,
+    minPrice:0, maxPrice:Infinity, minPriceStep:0, maxPriceStep:60 };
+  transferShown = 60;
+  transferPage = 0;
+  // Recruitment knowledge is not destroyed when a manager changes jobs.
+  // Your own reports travel with you, while the new club contributes the
+  // scouting intelligence it has built up before your arrival. Only live
+  // assignments belong to the old club's scouts, so those are cleared.
+  ensureClubScoutingNetwork();
+  const sc = scoutState();
+  sc.assignments = [];
+  sc.jobs = [];
+  mergeClubScoutingIntoManager(clubId);
+
   club.manager = null;                   // you are the manager now
   setBoardObjective();
   pushNews("New job", `You have been appointed manager of ${club.name}.`, "board");
@@ -14607,6 +14652,7 @@ function backfillState(){
   state.euro = state.euro || {};
 
   try{ normaliseStadiums(); }catch(e){ reportError("SAV-02", e, "stadium levels"); }
+  try{ ensureClubScoutingNetwork(); }catch(e){ reportError("SCT-02", e, "club scouting network"); }
   ensureManagers();
   if(!state.manager) initManagerProfile(state.clubId);
   _lastSquadSize = null;                 // a fresh load is not a collapse
@@ -16005,6 +16051,122 @@ function publicLine(p){
   return bits.join(" · ");
 }
 
+/* ---- Club recruitment intelligence ----
+   Scouting is part of the club, not a blank notebook carried by whoever is in
+   the dugout. Every club has been running recruitment before the player-manager
+   arrives, so a new job comes with useful reports immediately. The manager's
+   own reports are separate and travel with him between clubs. */
+function clubScoutingEntry(clubId){
+  if(!state.clubScouting) state.clubScouting = {};
+  if(!state.clubScouting[clubId]) state.clubScouting[clubId] = {reports:{}, lastRefreshSeason:state.season};
+  const e = state.clubScouting[clubId];
+  e.reports = e.reports || {};
+  return e;
+}
+
+function allScoutingCandidates(clubId){
+  const out = [];
+  Object.keys(state.squads || {}).forEach(cid=>{
+    if(cid === clubId) return;
+    (state.squads[cid]||[]).forEach(p=>{ if(p && !p.loanedFrom) out.push(p); });
+  });
+  (state.freeAgents||[]).forEach(p=>{ if(p) out.push(p); });
+  return out;
+}
+
+function seedClubScouting(clubId, target){
+  const club = clubById(clubId);
+  if(!club) return;
+  const entry = clubScoutingEntry(clubId);
+  const wanted = target || 10;
+  const have = Object.keys(entry.reports).length;
+  if(have >= wanted) return;
+  const candidates = allScoutingCandidates(clubId).filter(p=> !entry.reports[p.id]);
+  const levelTarget = Math.max(0, wanted - have);
+  // Sample rather than sorting the whole world for every club. Recruitment
+  // departments look for sensible targets, not simply the globally highest
+  // rated players.
+  const sample = [];
+  for(let i=0;i<Math.min(100,candidates.length);i++){
+    const p = candidates[rndInt(0,candidates.length-1)];
+    if(!p || sample.some(x=>x.id===p.id)) continue;
+    const seller = clubById(p.clubId);
+    const targetLevel = club.stature || 10;
+    const levelFit = -Math.abs((p.overall||50) - targetLevel) * 0.7;
+    const prospect = ((p.potential||p.overall) - (p.overall||0)) * 0.35;
+    const youth = p.age <= 23 ? 2.5 : p.age <= 26 ? 1 : 0;
+    const market = p.listed ? 2.2 : isFreeAgent(p) ? 1.8 : 0;
+    const affordability = (seller && seller.balance < club.balance*1.4) ? 0.7 : 0;
+    sample.push({p, score:levelFit+prospect+youth+market+affordability+rnd(-1.5,1.5)});
+  }
+  sample.sort((a,b)=>b.score-a.score);
+  sample.slice(0,levelTarget).forEach((x,i)=>{
+    entry.reports[x.p.id] = {level:i < Math.ceil(levelTarget*0.45) ? 2 : 1,
+      season:state.season, week:state.week, source:"club"};
+  });
+  entry.lastRefreshSeason = state.season;
+}
+
+function mergeClubScoutingIntoManager(clubId){
+  const sc = scoutState();
+  const entry = clubScoutingEntry(clubId);
+  Object.keys(entry.reports).forEach(id=>{
+    const clubReport = entry.reports[id];
+    const personal = sc.reports[id];
+    if(!personal || (clubReport.level||1) > (personal.level||0)){
+      sc.reports[id] = Object.assign({}, clubReport, {source:"club"});
+    }
+  });
+}
+
+function ensureClubScoutingNetwork(forceSeed){
+  if(!state || !state.squads) return;
+  if(!state.clubScouting) state.clubScouting = {};
+  Object.values(CLUB_META).forEach(club=>{
+    if(club.hidden) return;
+    const entry = clubScoutingEntry(club.id);
+    // New careers get a proper initial database. Existing saves are topped up
+    // gently so an old career does not suddenly reveal half the transfer market.
+    const target = forceSeed && Object.keys(entry.reports).length===0 ? 10 : 10;
+    seedClubScouting(club.id, target);
+  });
+  if(state.clubId){
+    const sc = scoutState();
+    sc.reports = sc.reports || {};
+    mergeClubScoutingIntoManager(state.clubId);
+  }
+}
+
+function recordClubScoutReport(playerId, level){
+  if(!state || !state.clubId || !playerId) return;
+  const entry = clubScoutingEntry(state.clubId);
+  const old = entry.reports[playerId];
+  if(!old || (old.level||0) < level){
+    entry.reports[playerId] = {level, week:state.week, season:state.season, source:"club"};
+  }
+}
+
+function refreshClubScouting(){
+  ensureClubScoutingNetwork();
+  Object.values(CLUB_META).forEach(club=>{
+    if(club.hidden) return;
+    const entry = clubScoutingEntry(club.id);
+    const current = Object.keys(entry.reports).length;
+    // Clubs continuously replace stale targets, just as a real recruitment
+    // department would. Keep most existing knowledge and add 2–4 fresh names.
+    const additions = rndInt(2,4);
+    const candidates = allScoutingCandidates(club.id).filter(p=> !entry.reports[p.id]);
+    for(let i=0;i<additions && candidates.length;i++){
+      const p = pick(candidates);
+      if(!p) break;
+      entry.reports[p.id] = {level:Math.random()<0.45?2:1, week:state.week, season:state.season, source:"club"};
+      candidates.splice(candidates.indexOf(p),1);
+    }
+    entry.lastRefreshSeason = state.season;
+  });
+  if(state.clubId) mergeClubScoutingIntoManager(state.clubId);
+}
+
 /* ---- Watching a named player ---- */
 function scoutPlayer(p){
   const sc = scoutState();
@@ -16046,6 +16208,7 @@ function tickScouting(){
     if(!p) return false;
     const lvl = Math.min(3, (sc.reports[p.id] ? sc.reports[p.id].level : 0) + 1);
     sc.reports[p.id] = {level: lvl, week: state.week, season: state.season};
+    recordClubScoutReport(p.id, lvl);
     done.push({kind:"player", player:p, level:lvl});
     return false;
   });
@@ -16057,6 +16220,7 @@ function tickScouting(){
     found.forEach(p=>{
       const cur = sc.reports[p.id] ? sc.reports[p.id].level : 0;
       if(cur < 1) sc.reports[p.id] = {level:1, week:state.week, season:state.season};
+      recordClubScoutReport(p.id, Math.max(1, cur));
     });
     done.push({kind:"assignment", brief:a, found:found});
     return false;
