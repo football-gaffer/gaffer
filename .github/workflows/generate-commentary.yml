@@ -1,20 +1,25 @@
 name: Generate natural commentary audio
+
 on:
   push:
     paths:
       - 'index.html'
       - '.github/workflows/generate-commentary.yml'
   workflow_dispatch:
+
 permissions:
   contents: write
+
 jobs:
   tts:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+
       - name: Generate natural Marin and Cedar MP3s
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -22,27 +27,124 @@ jobs:
           cat > /tmp/generate.mjs <<'NODE'
           import fs from 'node:fs/promises';
           import crypto from 'node:crypto';
-          const html=await fs.readFile('index.html','utf8');
-          await fs.mkdir('audio/marin',{recursive:true}); await fs.mkdir('audio/colour',{recursive:true});
-          const voices={marin:{voice:'marin',instructions:'You are a natural British football match commentator. Sound like a real live broadcaster: warm, spontaneous, confident and expressive. Use believable football-commentary pacing and emphasis. Do not sound like an audiobook, GPS, advert, or customer-service voice. Read only the supplied line.'},colour:{voice:'cedar',instructions:'You are a natural British football co-commentator and analyst. Sound like a real former professional on a live broadcast: calm, observant, dry when appropriate, and genuinely engaged. Use human pacing and emphasis. Do not sound synthetic or theatrical. Read only the supplied line.'}};
-          function block(name){const m=html.match(new RegExp('const\\s+'+name+'\\s*=\\s*\\{([\\s\\S]*?)\\n\\};'));return m?m[1]:''}
-          function strings(src){const out=[];const re=/(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)')/g;let m;while((m=re.exec(src))){if(/^\\s*:/.test(src.slice(re.lastIndex)))continue;out.push(m[1]??m[2]);}return out}
-          const texts=new Set();
-          for(const n of ['CO_LINES','COLOUR'])for(const x of strings(block(n)))if(x.length>=8&&x.length<=220&&!/[{}]/.test(x))texts.add(x);
-          const fm=html.match(/const\\s+FILLER\\s*=\\s*\\[([\\s\\S]*?)\\n\\s*\\];/);for(const x of strings(fm?fm[1]:''))if(x.length>=8&&x.length<=220&&!/[{}]/.test(x))texts.add(x);
-          for(const x of ['Kick off.','Full time.','What a finish!','You cannot defend that. Nothing you can do about it.','The second half is underway.','Half time.','That is a huge moment in the match.'])texts.add(x);
-          const manifest={version:1,items:{}};
-          const hash=x=>crypto.createHash('sha256').update(x).digest('hex').slice(0,24);
-          for(const [role,v] of Object.entries(voices)){
-            for(const text of texts){const id=hash(text),rel=`${role}/${id}.mp3`,file=`audio/${rel}`;try{await fs.access(file)}catch{const r=await fetch('https://api.openai.com/v1/audio/speech',{method:'POST',headers:{Authorization:`Bearer ${process.env.OPENAI_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify({model:'gpt-4o-mini-tts',voice:v.voice,input:text,instructions:v.instructions,response_format:'mp3',speed:1})});if(!r.ok)throw new Error(`TTS ${r.status}: ${await r.text()}`);await fs.writeFile(file,Buffer.from(await r.arrayBuffer()));}manifest.items[`${role}|${text}`]=rel;}
+
+          const apiKey = process.env.OPENAI_API_KEY;
+          if (!apiKey) throw new Error('OPENAI_API_KEY is not available to this workflow. Check the repository Actions secret name.');
+
+          const html = await fs.readFile('index.html', 'utf8');
+          await fs.mkdir('audio/marin', { recursive: true });
+          await fs.mkdir('audio/colour', { recursive: true });
+
+          const voices = {
+            marin: {
+              voice: 'marin',
+              instructions: 'You are a natural British football match commentator. Sound like a real live broadcaster: warm, spontaneous, confident and expressive. Use believable football-commentary pacing and emphasis. Do not sound like an audiobook, GPS, advert, or customer-service voice. Read only the supplied line.'
+            },
+            colour: {
+              voice: 'cedar',
+              instructions: 'You are a natural British football co-commentator and analyst. Sound like a real former professional on a live broadcast: calm, observant, dry when appropriate, and genuinely engaged. Use human pacing and emphasis. Do not sound synthetic or theatrical. Read only the supplied line.'
+            }
+          };
+
+          // Extract the contents of a named const object without trying to parse JavaScript.
+          function block(name) {
+            const re = new RegExp('const\\s+' + name + '\\s*=\\s*\\{([\\s\\S]*?)\\n\\};');
+            const m = html.match(re);
+            return m ? m[1] : '';
           }
-          await fs.writeFile('audio/manifest.json',JSON.stringify(manifest));
+
+          // Valid JS regex: collect quoted strings while allowing escaped quotes.
+          function strings(src) {
+            const out = [];
+            const re = /"([^"]*)"|'([^']*)'/g;
+            let m;
+            while ((m = re.exec(src))) {
+              // Skip object property names such as "someKey":
+              if (/^\s*:/.test(src.slice(re.lastIndex))) continue;
+              out.push(m[1] ?? m[2]);
+            }
+            return out;
+          }
+
+          const texts = new Set();
+          for (const n of ['CO_LINES', 'COLOUR']) {
+            for (const x of strings(block(n))) {
+              if (x.length >= 8 && x.length <= 220 && !/[{}]/.test(x)) texts.add(x);
+            }
+          }
+
+          const fm = html.match(/const\s+FILLER\s*=\s*\[([\s\S]*?)\n\s*\];/);
+          for (const x of strings(fm ? fm[1] : '')) {
+            if (x.length >= 8 && x.length <= 220 && !/[{}]/.test(x)) texts.add(x);
+          }
+
+          for (const x of [
+            'Kick off.',
+            'Full time.',
+            'What a finish!',
+            'You cannot defend that. Nothing you can do about it.',
+            'The second half is underway.',
+            'Half time.',
+            'That is a huge moment in the match.'
+          ]) texts.add(x);
+
+          console.log(`Found ${texts.size} authored commentary lines.`);
+          if (texts.size === 0) throw new Error('No authored commentary lines were found in index.html.');
+
+          const manifest = { version: 1, items: {} };
+          const hash = x => crypto.createHash('sha256').update(x).digest('hex').slice(0, 24);
+
+          for (const [role, v] of Object.entries(voices)) {
+            for (const text of texts) {
+              const id = hash(text);
+              const rel = `${role}/${id}.mp3`;
+              const file = `audio/${rel}`;
+
+              try {
+                await fs.access(file);
+              } catch {
+                console.log(`Generating ${role}: ${text}`);
+                const r = await fetch('https://api.openai.com/v1/audio/speech', {
+                  method: 'POST',
+                  headers: {
+                    Authorization: `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({
+                    model: 'gpt-4o-mini-tts',
+                    voice: v.voice,
+                    input: text,
+                    instructions: v.instructions,
+                    response_format: 'mp3',
+                    speed: 1
+                  })
+                });
+
+                if (!r.ok) {
+                  const body = await r.text();
+                  throw new Error(`OpenAI TTS ${r.status}: ${body}`);
+                }
+
+                await fs.writeFile(file, Buffer.from(await r.arrayBuffer()));
+              }
+
+              manifest.items[`${role}|${text}`] = rel;
+            }
+          }
+
+          await fs.writeFile('audio/manifest.json', JSON.stringify(manifest));
+          console.log(`Manifest contains ${Object.keys(manifest.items).length} audio entries.`);
           NODE
           node /tmp/generate.mjs
+
       - name: Commit generated audio
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add audio
-          git diff --cached --quiet || git commit -m 'Generate natural commentary audio'
-          git push
+          if git diff --cached --quiet; then
+            echo 'No new audio files to commit.'
+          else
+            git commit -m 'Generate natural commentary audio'
+            git push
+          fi
