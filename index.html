@@ -3696,7 +3696,7 @@ function confirmDialog(title, body){
    previous copy is kept so a bad migration can be rolled back rather than
    costing somebody a ten-season career.
    ========================================================================= */
-const SAVE_SCHEMA = 3;
+const SAVE_SCHEMA = 4;
 
 // Each entry brings a save from (key - 1) up to (key). Keep them small, keep
 // them defensive, and never assume a field is present.
@@ -3708,6 +3708,11 @@ const SAVE_MIGRATIONS = {
     if(!g.cups || typeof g.cups !== "object") g.cups = {};
     if(!g.natCups || typeof g.natCups !== "object") g.natCups = {};
     if(!g.euro || typeof g.euro !== "object") g.euro = {};
+  },
+  4: function(g){
+    // Match-by-match history was added after launch. Keep old careers intact and
+    // give the Results screen a real array to work with.
+    if(!Array.isArray(g.matchHistory)) g.matchHistory = [];
   },
   3: function(g){
     // Listings, morale and discipline could all arrive undefined from old saves.
@@ -4282,11 +4287,12 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "3.8.2";
+const GAME_VERSION = "3.8.3";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
 const VERSION_NOTES = {
+  "3.8.3": "Results are now immutable once a match finishes, and every match involving you is saved into a season-by-season Results tab with score, competition, possession, shots, cards, scorers and player of the match. Older careers are backfilled safely.",
   "3.8.2": "Scouting now belongs to clubs as well as the manager: every club starts with its own recruitment reports, those reports are available when you arrive, your personal reports travel with you between jobs, and AI clubs recruit from their own shortlists.",
   "3.8.1": "Changing clubs now resets the old club's transfer filters and scouting assignments, so a new job starts with a fresh recruitment department.",
   "3.8.0": "Transfer sorting, transfer pricing, offers, custom formations, sponsorships and long-save market continuity have been rebuilt and checked.",
@@ -4684,6 +4690,7 @@ function _saveStateNow(){
     // History is nice to have, not essential — trimmed so a career always saves.
     slim.wire = (state.wire||[]).slice(0,40);
     slim.news = (state.news||[]).slice(0,40);
+    slim.matchHistory = (state.matchHistory||[]).slice(-1500);
     const payload = encodeSave(JSON.stringify({clubMeta:packClubMeta(CLUB_META), game:slim, packed:2, schema:SAVE_SCHEMA}));
     window.localStorage.setItem(STORAGE_KEY, payload);
     const check = verifySave(STORAGE_KEY, payload);
@@ -4760,6 +4767,7 @@ function newCareer(clubId){
     honours: {leagueTitles:0, promotions:0, cups:[], seasons:[]},
     news: [],
     seasonStats: {played:0, won:0, drawn:0, lost:0, goalsFor:0, goalsAgainst:0},
+    matchHistory: [],
     boardObjective: null,
     freeAgents: [],
     offers: [],
@@ -4791,6 +4799,104 @@ function newCareer(clubId){
   pushNews("Welcome to " + clubById(clubId).name,
     "The board have handed you the reins. " + (state.boardObjective ? state.boardObjective.text : "Good luck."), "board");
   saveState();
+}
+
+/* ---- Match history ----
+   A finished match gets one permanent ledger entry. The fixture score and this
+   ledger are both written from the same final score, so the result shown later
+   can never be re-simulated into something different. */
+function ensureMatchHistory(){
+  if(!Array.isArray(state.matchHistory)) state.matchHistory = [];
+  return state.matchHistory;
+}
+
+function recordMatchHistory(info){
+  if(!info || !info.homeId || !info.awayId) return;
+  const home = clubById(info.homeId), away = clubById(info.awayId);
+  if(!home || !away) return;
+  const history = ensureMatchHistory();
+  const competition = info.competition || "League";
+  const key = [info.season||state.season, info.week||state.week, competition, info.homeId, info.awayId].join("|");
+  const entry = {
+    key, season:info.season||state.season, week:info.week||state.week,
+    competition, homeId:info.homeId, awayId:info.awayId,
+    home:home.name, away:away.name,
+    hg:Math.max(0, Math.round(info.hg||0)), ag:Math.max(0, Math.round(info.ag||0)),
+    possession: info.detail && Number.isFinite(info.detail.possession) ? info.detail.possession : null,
+    homeShots: info.detail && Number.isFinite(info.detail.homeShots) ? info.detail.homeShots : null,
+    awayShots: info.detail && Number.isFinite(info.detail.awayShots) ? info.detail.awayShots : null,
+    homeCards: info.detail ? (info.detail.homeCards||0) : 0,
+    awayCards: info.detail ? (info.detail.awayCards||0) : 0,
+    attendance: info.detail && info.detail.attendance ? info.detail.attendance.attendance : null,
+    gate: info.detail && info.detail.attendance ? info.detail.attendance.revenue : null,
+    motm: info.detail && info.detail.motmId ? ((findPlayerById(info.detail.motmId)||{}).id ? fullName(findPlayerById(info.detail.motmId)) : null) : null,
+    scorersHome: info.detail ? (info.detail.homeScorers||[]).filter(Boolean).map(fullName) : [],
+    scorersAway: info.detail ? (info.detail.awayScorers||[]).filter(Boolean).map(fullName) : [],
+  };
+  const idx = history.findIndex(x=>x && x.key===key);
+  if(idx>=0) history[idx] = entry;
+  else history.push(entry);
+  // Keep a long career usable in localStorage. 1,500 user matches is roughly
+  // 25-35 seasons for most careers, which is far beyond a normal save.
+  if(history.length>1500) history.splice(0, history.length-1500);
+}
+
+let resultsSeasonFilter = "current";
+
+function resultOutcome(entry){
+  if(!entry) return "";
+  const userHome = entry.homeId===state.clubId;
+  const mine = userHome ? entry.hg : entry.ag;
+  const theirs = userHome ? entry.ag : entry.hg;
+  return mine>theirs ? "W" : mine<theirs ? "L" : "D";
+}
+
+function renderResults(host){
+  const history = ensureMatchHistory().slice().sort((a,b)=>
+    (b.season-a.season) || (b.week-a.week) || String(b.key).localeCompare(String(a.key)));
+  const seasons = [...new Set(history.map(x=>x.season))];
+  const current = state.season;
+  if(!seasons.includes(current)) seasons.unshift(current);
+  if(resultsSeasonFilter!=="current" && !seasons.includes(+resultsSeasonFilter)) resultsSeasonFilter="current";
+  const chosen = resultsSeasonFilter==="current" ? current : +resultsSeasonFilter;
+  const rows = history.filter(x=>x.season===chosen);
+  const played = rows.length;
+  const wins = rows.filter(x=>resultOutcome(x)==="W").length;
+  const draws = rows.filter(x=>resultOutcome(x)==="D").length;
+  const losses = rows.filter(x=>resultOutcome(x)==="L").length;
+
+  host.innerHTML = `
+    <div class="section-title" style="margin-top:0;">Season results</div>
+    <div class="tier-tabs" id="resultsSeasonTabs"></div>
+    <div class="stat-row" style="margin-top:8px;">
+      <div class="stat-box"><div class="v num">${played}</div><div class="l">Played</div></div>
+      <div class="stat-box"><div class="v num">${wins}-${draws}-${losses}</div><div class="l">W-D-L</div></div>
+      <div class="stat-box"><div class="v num">${rows.reduce((n,x)=>n+(x.homeId===state.clubId?x.hg:x.ag),0)}-${rows.reduce((n,x)=>n+(x.homeId===state.clubId?x.ag:x.hg),0)}</div><div class="l">Goals F-A</div></div>
+    </div>
+    ${rows.length ? `<div class="list" style="margin-top:10px;">${rows.map(x=>{
+      const out=resultOutcome(x), userHome=x.homeId===state.clubId;
+      const mine=userHome?x.hg:x.ag, theirs=userHome?x.ag:x.hg;
+      const opp=userHome?x.away:x.home;
+      const score=`${x.hg}-${x.ag}`;
+      const cards=x.homeCards||x.awayCards ? ` · 🟨 ${x.homeCards||0}-${x.awayCards||0}` : "";
+      const stats=[];
+      if(x.possession!==null) stats.push(`${x.possession}-${100-x.possession}% poss`);
+      if(x.homeShots!==null) stats.push(`${x.homeShots}-${x.awayShots} shots`);
+      if(x.motm) stats.push(`POTM ${x.motm}`);
+      return `<div class="row" style="display:block; padding:11px 0; border-bottom:1px solid var(--line);">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span class="num" style="width:22px; font-weight:800; color:${out==='W'?'var(--good)':out==='L'?'var(--bad)':'var(--accent)'};">${out}</span>
+          <span style="flex:1; min-width:0;"><b>${userHome?"H":"A"} · ${opp}</b><br><span style="font-size:11px; color:var(--text-dim);">${x.competition} · wk ${x.week}</span></span>
+          <span class="num" style="font-size:18px;">${score}</span>
+        </div>
+        <div style="margin:6px 0 0 30px; font-size:11px; color:var(--text-dim);">${stats.join(" · ") || "Match stats unavailable"}${cards}</div>
+        ${(x.scorersHome.length||x.scorersAway.length) ? `<div style="margin:4px 0 0 30px; font-size:11px;">⚽ ${(x.scorersHome||[]).concat(x.scorersAway||[]).join(", ")}</div>` : ""}
+      </div>`;
+    }).join("")}</div>` : `<div class="empty-hint">No matches recorded for Season ${chosen} yet.</div>`}`;
+
+  renderPillTabs(document.getElementById("resultsSeasonTabs"),
+    seasons.map(se=>({value:se, label:`S${se}`})),
+    chosen, se=>{ resultsSeasonFilter=se; renderTable(); });
 }
 
 /* ---- News / inbox ---- */
@@ -12772,9 +12878,14 @@ function renderTable(){
     {value:"assists", label:"Assists"},
     {value:"cleanSheets", label:"Clean sheets"},
     {value:"rating", label:"Ratings"},
+    {value:"results", label:"Results"},
   ], tableView, v=>{ tableView = v; renderTable(); });
 
   const viewBody = document.getElementById("tableViewBody");
+  if(tableView === "results"){
+    renderResults(viewBody);
+    return;
+  }
   if(tableView !== "table"){
     renderLeaderboard(viewBody, activeTableTier, tableView);
     return;
@@ -13451,8 +13562,11 @@ async function advanceWeek(){
     const detail = buildMatchDetail(r.home, r.away, r.hg, r.ag);
     detail.ctx = r.ctx;
     commitMatchStats(r.home, r.away, r.hg, r.ag, detail);
-    await playMatchDay({home:r.home, away:r.away, hg:r.hg, ag:r.ag, week:r.week},
+    const friendlyFx = {home:r.home, away:r.away, hg:r.hg, ag:r.ag, week:r.week};
+    const finalFriendly = await playMatchDay(friendlyFx,
       "Pre-season friendly", detail);
+    if(finalFriendly){ r.hg=finalFriendly.hg; r.ag=finalFriendly.ag; }
+    recordMatchHistory({season:state.season, week:r.week, competition:"Pre-season friendly", homeId:r.home, awayId:r.away, hg:r.hg, ag:r.ag, detail});
     const opp = clubById(r.away);
     pushNews("Friendly result",
       `${clubById(r.home).name} ${r.hg}-${r.ag} ${opp?opp.name:""} in ${state.preSeason.name}.`, "info");
@@ -13505,7 +13619,9 @@ async function advanceWeek(){
     if(sc.a===state.clubId || sc.b===state.clubId){
       const detail = buildMatchDetail(sc.a, sc.b, res.hg, res.ag);
       commitMatchStats(sc.a, sc.b, res.hg, res.ag, detail);
-      await playMatchDay({home:sc.a, away:sc.b, hg:res.hg, ag:res.ag, week}, "UEFA Super Cup", detail);
+      const superFx = {home:sc.a, away:sc.b, hg:res.hg, ag:res.ag, week};
+      const finalSuper = await playMatchDay(superFx, "UEFA Super Cup", detail);
+      if(finalSuper){ sc.hg=finalSuper.hg; sc.ag=finalSuper.ag; recordMatchHistory({season:state.season, week, competition:"UEFA Super Cup", homeId:sc.a, awayId:sc.b, hg:sc.hg, ag:sc.ag, detail}); }
       if(res.winner===state.clubId){
         clubById(state.clubId).balance += 5000000;
         state.honours.cups.push({name:"UEFA Super Cup", season:state.season});
@@ -13517,7 +13633,8 @@ async function advanceWeek(){
   for(const et of euroTies){
     const detail = buildMatchDetail(et.tie.home, et.tie.away, et.tie.hg, et.tie.ag);
     commitMatchStats(et.tie.home, et.tie.away, et.tie.hg, et.tie.ag, detail);
-    await playMatchDay(et.tie, et.label, detail);
+    const finalEuro = await playMatchDay(et.tie, et.label, detail);
+    if(finalEuro){ et.tie.hg=finalEuro.hg; et.tie.ag=finalEuro.ag; recordMatchHistory({season:state.season, week, competition:EURO_COMPS[et.key].name, homeId:et.tie.home, awayId:et.tie.away, hg:et.tie.hg, ag:et.tie.ag, detail}); }
     if(et.prize) toast(`${EURO_COMPS[et.key].name} prize money: ${fmtMoney(et.prize)}`);
     pushNews(et.label, `${clubById(et.tie.home).name} ${et.tie.hg}-${et.tie.ag} ${clubById(et.tie.away).name}`, "cup");
   }
@@ -13546,7 +13663,9 @@ async function advanceWeek(){
         if(gate.soldOut) pushNews("Sell-out!",
           `${gate.attendance.toLocaleString()} packed in for the visit of ${clubById(t.b).name}. Gate receipts: ${fmtMoney(gate.revenue)}.`, "cup");
       }
-      await playMatchDay({home:t.a, away:t.b, hg:t.hg, ag:t.ag, week}, `${outcome.cfg.name} — Round ${outcome.roundIdx+1}`, detail);
+      const domesticFx = {home:t.a, away:t.b, hg:t.hg, ag:t.ag, week};
+      const finalDomestic = await playMatchDay(domesticFx, `${outcome.cfg.name} — Round ${outcome.roundIdx+1}`, detail);
+      if(finalDomestic){ t.hg=finalDomestic.hg; t.ag=finalDomestic.ag; recordMatchHistory({season:state.season, week, competition:outcome.cfg.name, homeId:t.a, awayId:t.b, hg:t.hg, ag:t.ag, detail}); }
       toast(`${outcome.cfg.name} prize money: ${fmtMoney(t.prize)}`);
       pushNews(`${outcome.cfg.name} Round ${outcome.roundIdx+1}`,
         `${clubById(t.a).name} ${t.hg}-${t.ag} ${clubById(t.b).name}. Prize money: ${fmtMoney(t.prize)}.`, "cup");
@@ -13571,7 +13690,9 @@ async function advanceWeek(){
       detail.attendance = gate;
       state.pendingCupGate = (state.pendingCupGate||0) + gate.revenue;
     }
-    await playMatchDay({home:t.a, away:t.b, hg:t.hg, ag:t.ag, week}, pendingNatCupTie.name, detail);
+    const natFx = {home:t.a, away:t.b, hg:t.hg, ag:t.ag, week};
+    const finalNat = await playMatchDay(natFx, pendingNatCupTie.name, detail);
+    if(finalNat){ t.hg=finalNat.hg; t.ag=finalNat.ag; recordMatchHistory({season:state.season, week, competition:pendingNatCupTie.name, homeId:t.a, awayId:t.b, hg:t.hg, ag:t.ag, detail}); }
     toast(`${pendingNatCupTie.name} prize: ${fmtMoney(t.prize)}`);
   }
 
@@ -13586,9 +13707,11 @@ async function advanceWeek(){
     /* Stats are committed AFTER the match is played, because managing it can
        change the score — a substitution that wins you the game has to appear
        in the table, not just on screen. */
-    await playMatchDay(pending, null, detail);
+    const finalLeague = await playMatchDay(pending, null, detail);
+    if(finalLeague){ pending.hg=finalLeague.hg; pending.ag=finalLeague.ag; }
     const fhg = pending.hg, fag = pending.ag;
     commitMatchStats(pending.home, pending.away, fhg, fag, detail);
+    recordMatchHistory({season:state.season, week, competition:"League", homeId:pending.home, awayId:pending.away, hg:fhg, ag:fag, detail});
 
     const isHome = pending.home===state.clubId;
     const myGoals = isHome?fhg:fag, oppGoals = isHome?fag:fhg;
@@ -13869,10 +13992,14 @@ function playMatchDay(fixture, label, detail){
       if(finished) return;
       finished = true;
       stopSpeaking();
-      // Managing the match makes it the authority on the score. Write it back.
-      if(changed){
-        fixture.hg = hg; fixture.ag = ag;
-        if(detail){ detail.liveHg = hg; detail.liveAg = ag; }
+      // The live match is ALWAYS the final authority. Never leave the original
+      // pre-match simulation sitting on the fixture after the whistle.
+      fixture.hg = Math.max(0, Math.round(hg));
+      fixture.ag = Math.max(0, Math.round(ag));
+      if(detail){
+        detail.liveHg = fixture.hg; detail.liveAg = fixture.ag;
+        detail.homeCards = events.filter(e=>e.side==="home" && (e.type==="yellow" || e.type==="red")).length;
+        detail.awayCards = events.filter(e=>e.side==="away" && (e.type==="yellow" || e.type==="red")).length;
       }
       if(mgrRow) mgrRow.style.display = "none";
       closePanel();
@@ -13889,10 +14016,10 @@ function playMatchDay(fixture, label, detail){
       renderSummary();
       const closeBtn = document.getElementById("matchClose");
       closeBtn.style.visibility="visible";
-      closeBtn.onclick = ()=>{ document.getElementById("matchBackdrop").classList.remove("open"); resolve(); };
+      closeBtn.onclick = ()=>{ document.getElementById("matchBackdrop").classList.remove("open"); resolve({hg:fixture.hg, ag:fixture.ag}); };
       const cont = document.createElement("button");
       cont.className = "btn-primary"; cont.textContent = "Continue";
-      cont.onclick = ()=>{ document.getElementById("matchBackdrop").classList.remove("open"); resolve(); };
+      cont.onclick = ()=>{ document.getElementById("matchBackdrop").classList.remove("open"); resolve({hg:fixture.hg, ag:fixture.ag}); };
       modal.appendChild(cont);
     }
 
@@ -14605,6 +14732,7 @@ function renderSlotPicker(){
    before the career is handed to the app.
    ------------------------------------------------------------------------- */
 function backfillState(){
+  state.matchHistory = Array.isArray(state.matchHistory) ? state.matchHistory : [];
   state.freeAgents = state.freeAgents||[]; state.offers = state.offers||[];
   state.transferRequests = state.transferRequests||[]; state.jobOffers = state.jobOffers||[];
   state.sackPressure = state.sackPressure||0; state.pendingCupGate = state.pendingCupGate||0;
