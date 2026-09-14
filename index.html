@@ -1285,6 +1285,8 @@
   ::-webkit-scrollbar{display:none;}
 
   body.reduced-motion *{animation-duration:0.01ms !important; animation-iteration-count:1 !important; transition-duration:0.01ms !important;}
+
+.stadium-hero{display:flex;justify-content:space-between;gap:14px;align-items:center;padding:16px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(135deg,var(--panel),var(--panel2));margin-bottom:12px}.stadium-hero-stat{min-width:100px;text-align:center}.stadium-hero-stat b{display:block;font-size:25px}.stadium-hero-stat span{font-size:11px;color:var(--text-dim)}.stadium-summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:16px}.stadium-stat{padding:11px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}.stadium-stat b{display:block;font-size:11px}.stadium-stat span{display:block;margin-top:4px;font-size:12px;color:var(--text-dim)}.stadium-section-title{font-size:14px;font-weight:800;margin:18px 0 9px}.stadium-stands,.stadium-projects{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.stadium-stand-card,.stadium-project-card{padding:12px;border:1px solid var(--line);border-radius:14px;background:var(--panel)}.stand-graphic{height:62px;border-radius:10px;background:linear-gradient(180deg,#303b45 0 28%,#172027 28% 100%);position:relative;overflow:hidden;margin-bottom:10px}.stand-roof{position:absolute;left:8%;right:8%;top:8px;height:8px;border-radius:4px;background:var(--accent)}.stand-seats{position:absolute;left:10%;right:10%;bottom:8px;height:calc(10px + (var(--rows) * 7px));background:repeating-linear-gradient(180deg,rgba(255,255,255,.75) 0 3px,transparent 3px 7px);opacity:.7}.stand-label{position:absolute;left:10px;bottom:9px;font-size:10px;font-weight:800;text-shadow:0 1px 2px #000}.stadium-project-card .top,.stadium-stand-card .top{display:flex;justify-content:space-between;gap:8px}.stadium-project-card .name,.stadium-stand-card .name{font-weight:800}.stadium-project-card .lvl,.stadium-stand-card .lvl{font-size:11px;color:var(--text-dim)}.stadium-project-card .desc,.stadium-stand-card .desc{font-size:11px;color:var(--text-dim);line-height:1.4;margin:6px 0 8px}.stadium-project-card .pips,.stadium-stand-card .pips{display:flex;gap:4px;margin:7px 0}.stadium-project-card .pip,.stadium-stand-card .pip{height:5px;flex:1;border-radius:5px;background:var(--line)}.stadium-project-card .pip.on,.stadium-stand-card .pip.on{background:var(--accent)}.stadium-action{width:100%;margin-top:8px}.stadium-max{font-size:11px;color:var(--good);font-weight:700;margin-top:9px}.stadium-chairman{margin-top:16px;padding:13px;border-left:3px solid var(--accent);border-radius:10px;background:var(--panel)}.stadium-chairman b{display:block;margin-bottom:5px}.stadium-chairman div{font-size:12px;color:var(--text-dim);line-height:1.45}@media(max-width:700px){.stadium-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.stadium-stands,.stadium-projects{grid-template-columns:1fr}.stadium-hero{align-items:flex-start}.stadium-hero-stat{min-width:86px}}
 </style>
 <style id="v390-expansion-css">
 .player-personality{display:flex;justify-content:space-between;gap:12px;padding:9px 11px;margin:8px 0 12px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.025);font-size:12px}
@@ -3753,7 +3755,7 @@ function confirmDialog(title, body){
    previous copy is kept so a bad migration can be rolled back rather than
    costing somebody a ten-season career.
    ========================================================================= */
-const SAVE_SCHEMA = 5;
+const SAVE_SCHEMA = 6;
 
 // Each entry brings a save from (key - 1) up to (key). Keep them small, keep
 // them defensive, and never assume a field is present.
@@ -3770,6 +3772,11 @@ const SAVE_MIGRATIONS = {
     // Match-by-match history was added after launch. Keep old careers intact and
     // give the Results screen a real array to work with.
     if(!Array.isArray(g.matchHistory)) g.matchHistory = [];
+  },
+  6: function(g){
+    // Stadium development became its own persistent subsystem. Existing careers
+    // are seeded from their current stadium level by ensureStadiumDevelopment().
+    if(!g.stadiumProjects || typeof g.stadiumProjects !== "object") g.stadiumProjects = {};
   },
   5: function(g){
     if(!g.clubIdentity || typeof g.clubIdentity !== "object") g.clubIdentity = {};
@@ -3957,7 +3964,7 @@ function unpackFixtures(packed){
 }
 
 // Only the mutable half of a club record is worth writing.
-const CLUB_SAVE_KEYS = ["balance","stature","capacity","facilities","hidden","shadowOf","nickname","rivalId","philosophy","boardStyle","supporterBase",
+const CLUB_SAVE_KEYS = ["balance","stature","capacity","facilities","stadiumDev","hidden","shadowOf","nickname","rivalId","philosophy","boardStyle","supporterBase",
   "justRelegated","justPromoted","tier","wageBudget","transferEmbargo","pointsDeduction",
   "inAdministration","manager","vacantSince"];
 function packClubMeta(meta){
@@ -4365,11 +4372,14 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "3.9.0";
+const GAME_VERSION = "3.9.4";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
 const VERSION_NOTES = {
+  "3.9.3": "Dedicated stadium development page with four stands, floodlights, concessions, hospitality, access and pitch projects; stadium removed from generic facilities.",
+  "3.9.2": "Club badges redesigned: every club now gets a deterministic original crest with club-specific motifs, richer layouts and cleaner vector styling, without licensed artwork.",
+  "3.9.1": "Club nicknames corrected: established nicknames are now used instead of generated names; unknown clubs no longer receive invented nicknames.",
   "3.9.0": "Club-building expansion: richer club identity, boardroom and supporter confidence, manager reputation growth, player personalities and rivalries, with save migration for long careers.",
   "3.8.6": "Create Your Own Club colour scheme: choose primary and secondary club colours, used across the custom crest, kits and club presentation; colours persist in saves.",
   "3.8.5": "Create Your Own Club mode: choose a National League North or South club to replace, give the new club its own name, and start with a fresh squad in that league.",
@@ -10873,6 +10883,7 @@ const FACILITY_COSTS = {
   training: [  650000,  4800000,  24000000,   90000000],
   youth:    [  550000,  4000000,  20000000,   75000000],
   medical:  [  450000,  3200000,  16000000,   60000000],
+  recruitment: [  500000,  3000000,  12000000,   40000000],
 };
 
 function facilityCost(tierId, key, currentLevel){
@@ -11123,36 +11134,105 @@ function initials(name){
 
 // 6 deterministic crest variants combining shape + color-layout, so every
 // club looks distinct without touching any real badge design.
-function crestSVG(club, size){
-  size = size||40;
-  const w=size, h=size*1.1;
-  const variant = club.crestVariant||0;
-  const P = club.primary, S = club.secondary;
-  let shapePoints, fillDefs;
-  const isRound = variant>=3;
-  shapePoints = isRound
-    ? `${w/2},2 ${w-2},${h*0.32} ${w-2},${h*0.66} ${w/2},${h-2} 2,${h*0.66} 2,${h*0.32}`
-    : `2,2 ${w-2},2 ${w-2},${h*0.62} ${w/2},${h-2} 2,${h*0.62}`;
-  const layout = variant % 3; // 0: band, 1: diagonal halves, 2: vertical halves
-  let inner = "";
-  const clipId = "clip"+club.id;
-  if(layout===0){
-    inner = `<rect x="0" y="${h*0.5}" width="${w}" height="${h*0.16}" fill="${S}"/>`;
-  } else if(layout===1){
-    inner = `<polygon points="0,0 ${w},0 0,${h}" fill="${S}" opacity="0.85"/>`;
-  } else {
-    inner = `<rect x="${w/2}" y="0" width="${w/2}" height="${h}" fill="${S}" opacity="0.85"/>`;
-  }
-  return `<div class="shield" style="width:${w}px;height:${h}px;">
-    <svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
-      <defs><clipPath id="${clipId}"><polygon points="${shapePoints}"/></clipPath></defs>
-      <polygon points="${shapePoints}" fill="${P}"/>
-      <g clip-path="url(#${clipId})">${inner}</g>
-    </svg>
-    <div class="initials" style="color:${isLight(P)&&layout!==0?"#14110A":S}; font-size:${size*0.32}px; top:-1px;">${initials(club.name)}</div>
-  </div>`;
+function badgeMotif(name){
+  const n = String(name||'').toLowerCase();
+  if(/arsenal/.test(n)) return 'cannon';
+  if(/liverpool/.test(n)) return 'bird';
+  if(/newcastle/.test(n)) return 'magpie';
+  if(/chelsea|lyon|lions?/.test(n)) return 'lion';
+  if(/manchester united/.test(n)) return 'trident';
+  if(/manchester city|portsmouth|plymouth|brighton|sunderland|southampton|cardiff|carlisle|fleetwood|port vale|blackpool/.test(n)) return 'ship';
+  if(/tottenham/.test(n)) return 'cockerel';
+  if(/west ham/.test(n)) return 'hammers';
+  if(/leicester/.test(n)) return 'fox';
+  if(/brentford|watford/.test(n)) return 'bee';
+  if(/nottingham forest/.test(n)) return 'tree';
+  if(/derby/.test(n)) return 'ram';
+  if(/blackburn/.test(n)) return 'rose';
+  if(/palace/.test(n)) return 'eagle';
+  if(/wolverhampton|wolves/.test(n)) return 'wolf';
+  if(/bournemouth|cherries/.test(n)) return 'cherries';
+  if(/everton|aston villa|rangers|ipswich|sunderland/.test(n)) return 'tower';
+  if(/fulham|preston|sheffield|stockport|bolton|burnley|stoke|millwall|reading|wigan|wrexham/.test(n)) return 'shield';
+  if(/norwich/.test(n)) return 'canary';
+  if(/swansea|brighton|seagull|gillingham|grimsby|falkirk/.test(n)) return 'wave';
+  if(/cardiff|wrexham|dragon/.test(n)) return 'dragon';
+  if(/forest|wood|rotherham|barnsley/.test(n)) return 'leaf';
+  if(/united/.test(n)) return 'star';
+  if(/city/.test(n)) return 'ball';
+  if(/real madrid|real sociedad|real betis|real/.test(n)) return 'crown';
+  if(/barcelona|athletic|bilbao|sevilla|valencia|espanyol|malaga|deportivo|celta|osasuna|rayo|alaves|elche|levante/.test(n)) return 'shield';
+  if(/milan|juventus|napoli|roma|lazio|fiorentina|bologna|torino|udinese|genoa|lecce|parma|sassuolo|venezia|monza|cagliari/.test(n)) return 'star';
+  if(/bayern|dortmund|leipzig|leverkusen|stuttgart|frankfurt|freiburg|bremen|union|augsburg|gladbach|mainz|koln|hamburg|schalke|paderborn/.test(n)) return 'eagle';
+  if(/psg|paris|marseille|monaco|lille|lens|nice|rennes|strasbourg|toulouse|brest|auxerre|angers|havre|lorient|troyes|mans/.test(n)) return 'fleur';
+  if(/ajax|psv|feyenoord|alkmaar|twente|utrecht|sparta|eagles|heerenveen|fortuna|zwolle|groningen|telstar|excelsior|heracles|volendam|nac/.test(n)) return 'diamond';
+  if(/benfica|porto|sporting|braga|guimaraes|famalicao|moreirense|santa clara|estoril|gil vicente|casa pia|rio ave|arouca|nacional|maritimo/.test(n)) return 'cross';
+  if(/celtic/.test(n)) return 'shamrock';
+  if(/rangers|hearts|hibernian|aberdeen|motherwell|st mirren|kilmarnock|dundee|livingston/.test(n)) return 'shield';
+  if(/galatasaray|fenerbahce|besiktas|trabzon|salzburg|sturm|rapid|young boys|basel|olympiacos|paok|aek|panathinaikos|slavia|sparta|viktoria|copenhagen|midtjylland|brondby|bodo|molde|rosenborg|dinamo|hajduk|red star|partizan|legia|lech|shakhtar|dynamo|malmo|aik|djurgarden/.test(n)) return 'star';
+  return ['ball','star','shield','diamond','crown','wave'][hashStr(name)%6];
 }
 
+function crestSVG(club, size){
+  size = size||40;
+  const w=size, h=size*1.12;
+  const name = String(club && club.name || 'Club');
+  const P = club && club.primary || '#234';
+  const S = club && club.secondary || '#fff';
+  const style = hashStr(name)%12;
+  const motif = badgeMotif(name);
+  const round = style===2 || style===7 || style===10;
+  const shield = round ? `M ${w/2} 1 A ${w/2-2} ${w/2-2} 0 1 1 ${w/2} ${w-1} A ${w/2-2} ${w/2-2} 0 1 1 ${w/2} 1 Z`
+                       : (style%2===0 ? `M 2 2 H ${w-2} V ${h*0.62} Q ${w/2} ${h-2} 2 ${h*0.62} Z`
+                                      : `M ${w/2} 1 L ${w-2} 6 V ${h*0.64} Q ${w-2} ${h*0.78} ${w/2} ${h-2} Q 2 ${h*0.78} 2 ${h*0.64} V 6 Z`);
+  const clip = `badgeClip_${hashStr(name)}_${size}`;
+  let field='';
+  if(style%4===0) field=`<rect width="${w}" height="${h}" fill="${S}" opacity=".92"/>`;
+  else if(style%4===1) field=`<path d="M0 0 L${w} 0 L0 ${h}Z" fill="${S}" opacity=".88"/>`;
+  else if(style%4===2) field=`<rect x="${w*.42}" width="${w*.16}" height="${h}" fill="${S}" opacity=".88"/>`;
+  else field=`<rect y="${h*.42}" width="${w}" height="${h*.16}" fill="${S}" opacity=".88"/>`;
+
+  const ink = isLight(P) ? '#171717' : '#FFFFFF';
+  const accent = isLight(S) ? P : S;
+  const cx=w/2, cy=h*.47, r=Math.min(w,h)*.23;
+  const star = `<path d="M ${cx} ${cy-r} L ${cx+r*.24} ${cy-r*.28} L ${cx+r} ${cy-r*.28} L ${cx+r*.38} ${cy+.08*r} L ${cx+r*.62} ${cy+r} L ${cx} ${cy+.43*r} L ${cx-r*.62} ${cy+r} L ${cx-r*.38} ${cy+.08*r} L ${cx-r} ${cy-r*.28} L ${cx-r*.24} ${cy-r*.28} Z" fill="${accent}"/>`;
+  let icon='';
+  switch(motif){
+    case 'cannon': icon=`<g stroke="${accent}" stroke-width="${Math.max(1.5,size*.045)}" fill="none" stroke-linecap="round"><circle cx="${cx-2}" cy="${cy+2}" r="${r*.52}"/><path d="M${cx-r*.1} ${cy-r*.2} L${cx+r*.72} ${cy-r*.72} L${cx+r*.84} ${cy-r*.55} L${cx+.12*r} ${cy+.02*r}"/><path d="M${cx-r*.72} ${cy+r*.52} H${cx+r*.32}"/></g>`; break;
+    case 'hammers': icon=`<g stroke="${accent}" stroke-width="${Math.max(2,size*.07)}" stroke-linecap="round"><path d="M${cx-r*.72} ${cy-r*.62} L${cx+r*.68} ${cy+r*.65}"/><path d="M${cx+r*.72} ${cy-r*.62} L${cx-r*.68} ${cy+r*.65}"/></g><g stroke="${accent}" stroke-width="${Math.max(2,size*.08)}" stroke-linecap="round"><path d="M${cx-r*.85} ${cy-r*.72} h${r*.32}"/><path d="M${cx+r*.53} ${cy-r*.72} h${r*.32}"/></g>`; break;
+    case 'ship': icon=`<g fill="${accent}"><path d="M${cx-r*.95} ${cy+r*.3} Q${cx} ${cy+r*.72} ${cx+r*.95} ${cy+r*.3} L${cx+r*.7} ${cy+r*.65} Q${cx} ${cy+r*.95} ${cx-r*.7} ${cy+r*.65}Z"/><path d="M${cx-.06*r} ${cy-r*.75} H${cx+.08*r} V${cy+r*.28} H${cx-.06*r}Z"/><path d="M${cx+.1*r} ${cy-r*.7} L${cx+r*.68} ${cy-r*.22} H${cx+.1*r}Z"/></g>`; break;
+    case 'bird': case 'magpie': case 'eagle': case 'canary': case 'cockerel': icon=`<path d="M${cx-r*.82} ${cy+.25*r} Q${cx-r*.38} ${cy-r*.72} ${cx+.18*r} ${cy-r*.18} Q${cx+r*.5} ${cy-r*.72} ${cx+r*.88} ${cy-r*.45} Q${cx+r*.48} ${cy-r*.12} ${cx+r*.2} ${cy+.28*r} L${cx+r*.82} ${cy+.7*r} Q${cx} ${cy+.9*r} ${cx-r*.82} ${cy+.25*r}Z" fill="${accent}"/>`; break;
+    case 'lion': case 'wolf': icon=`<path d="M${cx-r*.62} ${cy-r*.55} L${cx-r*.2} ${cy-r*.82} L${cx} ${cy-r*.55} L${cx+r*.2} ${cy-r*.82} L${cx+r*.62} ${cy-r*.55} L${cx+r*.78} ${cy-r*.05} L${cx+r*.58} ${cy+r*.58} L${cx} ${cy+r*.88} L${cx-r*.58} ${cy+r*.58} L${cx-r*.78} ${cy-r*.05}Z" fill="${accent}"/>`; break;
+    case 'fox': icon=`<path d="M${cx-r*.8} ${cy-r*.72} L${cx-r*.12} ${cy-r*.48} L${cx} ${cy-r*.82} L${cx+r*.12} ${cy-r*.48} L${cx+r*.8} ${cy-r*.72} L${cx+r*.62} ${cy+.45*r} Q${cx} ${cy+r*.9} ${cx-r*.62} ${cy+.45*r}Z" fill="${accent}"/>`; break;
+    case 'bee': icon=`<ellipse cx="${cx}" cy="${cy}" rx="${r*.58}" ry="${r*.78}" fill="${accent}"/><path d="M${cx-r*.48} ${cy-r*.15} H${cx+r*.48} M${cx-r*.5} ${cy+.22*r} H${cx+r*.5}" stroke="${P}" stroke-width="${Math.max(1,size*.045)}"/><path d="M${cx-r*.42} ${cy-r*.62} Q${cx-r*1.05} ${cy-r*.98} ${cx-r*.72} ${cy-r*.25} M${cx+r*.42} ${cy-r*.62} Q${cx+r*1.05} ${cy-r*.98} ${cx+r*.72} ${cy-r*.25}" fill="none" stroke="${accent}" stroke-width="${Math.max(1,size*.05)}"/>`; break;
+    case 'tree': case 'leaf': icon=`<path d="M${cx} ${cy-r*.72} C${cx-r*.9} ${cy-r*.2} ${cx-r*.65} ${cy+r*.35} ${cx} ${cy+r*.22} C${cx+r*.65} ${cy+r*.35} ${cx+r*.9} ${cy-r*.2} ${cx} ${cy-r*.72}Z" fill="${accent}"/><path d="M${cx} ${cy+r*.1} V${cy+r*.82}" stroke="${accent}" stroke-width="${Math.max(1.5,size*.055)}"/>`; break;
+    case 'ram': icon=`<path d="M${cx-r*.72} ${cy-r*.18} Q${cx-r*.9} ${cy-r*.85} ${cx-r*.25} ${cy-r*.72} Q${cx} ${cy-r*.95} ${cx+r*.25} ${cy-r*.72} Q${cx+r*.9} ${cy-r*.85} ${cx+r*.72} ${cy-r*.18} L${cx+r*.5} ${cy+r*.58} H${cx-r*.5}Z" fill="${accent}"/>`; break;
+    case 'rose': case 'fleur': icon=`<g fill="${accent}"><circle cx="${cx}" cy="${cy}" r="${r*.25}"/><circle cx="${cx-r*.32}" cy="${cy-r*.18}" r="${r*.28}"/><circle cx="${cx+r*.32}" cy="${cy-r*.18}" r="${r*.28}"/><circle cx="${cx}" cy="${cy-r*.4}" r="${r*.28}"/></g><path d="M${cx} ${cy+r*.18} V${cy+r*.8}" stroke="${accent}" stroke-width="${Math.max(1.5,size*.05)}"/>`; break;
+    case 'tower': icon=`<g fill="${accent}"><path d="M${cx-r*.45} ${cy+r*.78} V${cy-r*.58} H${cx+r*.45} V${cy+r*.78}Z"/><path d="M${cx-r*.58} ${cy-r*.58} H${cx+r*.58} L${cx+r*.42} ${cy-r*.86} H${cx-r*.42}Z"/></g>`; break;
+    case 'dragon': icon=`<path d="M${cx-r*.8} ${cy+r*.52} Q${cx-r*.25} ${cy-r*.8} ${cx+r*.65} ${cy-r*.25} L${cx+r*.88} ${cy-r*.62} L${cx+r*.75} ${cy+.05*r} L${cx+r*.95} ${cy+r*.42} L${cx+r*.35} ${cy+r*.2} Q${cx+r*.05} ${cy+r*.75} ${cx-r*.8} ${cy+r*.52}Z" fill="${accent}"/>`; break;
+    case 'shamrock': icon=`<g fill="${accent}"><circle cx="${cx-r*.3}" cy="${cy-r*.2}" r="${r*.34}"/><circle cx="${cx+r*.3}" cy="${cy-r*.2}" r="${r*.34}"/><circle cx="${cx}" cy="${cy-r*.58}" r="${r*.34}"/><path d="M${cx} ${cy-r*.2} V${cy+r*.75}" stroke="${accent}" stroke-width="${Math.max(1.5,size*.06)}"/></g>`; break;
+    case 'wave': icon=`<path d="M${cx-r*.9} ${cy-r*.12} Q${cx-r*.45} ${cy-r*.62} ${cx} ${cy-r*.12} T${cx+r*.9} ${cy-r*.12} V${cy+r*.28} Q${cx+r*.45} ${cy-r*.22} ${cx} ${cy+r*.28} T${cx-r*.9} ${cy+r*.28}Z" fill="${accent}"/>`; break;
+    case 'cherries': icon=`<g fill="${accent}"><circle cx="${cx-r*.32}" cy="${cy+.38*r}" r="${r*.3}"/><circle cx="${cx+r*.32}" cy="${cy+.38*r}" r="${r*.3}"/><path d="M${cx-r*.32} ${cy+.2*r} Q${cx-r*.05} ${cy-r*.72} ${cx} ${cy-r*.82} M${cx+r*.32} ${cy+.2*r} Q${cx+r*.05} ${cy-r*.72} ${cx} ${cy-r*.82}" fill="none" stroke="${accent}" stroke-width="${Math.max(1,size*.05)}"/></g>`; break;
+    case 'crown': icon=`<path d="M${cx-r*.78} ${cy-r*.55} L${cx-r*.45} ${cy+.15} L${cx} ${cy-r*.28} L${cx+r*.45} ${cy+.15} L${cx+r*.78} ${cy-r*.55} L${cx+r*.58} ${cy+r*.65} H${cx-r*.58}Z" fill="${accent}"/>`; break;
+    case 'diamond': icon=`<path d="M${cx} ${cy-r*.88} L${cx+r*.72} ${cy} L${cx} ${cy+r*.88} L${cx-r*.72} ${cy}Z" fill="${accent}"/>`; break;
+    case 'cross': icon=`<g fill="${accent}"><rect x="${cx-r*.12}" y="${cy-r*.75}" width="${r*.24}" height="${r*1.5}"/><rect x="${cx-r*.75}" y="${cy-r*.12}" width="${r*1.5}" height="${r*.24}"/></g>`; break;
+    case 'trident': icon=`<g stroke="${accent}" stroke-width="${Math.max(1.5,size*.055)}" fill="none" stroke-linecap="round"><path d="M${cx} ${cy+r*.78} V${cy-r*.65}"/><path d="M${cx-r*.62} ${cy-r*.35} Q${cx-r*.35} ${cy-r*.82} ${cx} ${cy-r*.35} Q${cx+r*.35} ${cy-r*.82} ${cx+r*.62} ${cy-r*.35}"/><path d="M${cx-r*.62} ${cy-r*.35} V${cy-r*.72} M${cx+r*.62} ${cy-r*.35} V${cy-r*.72}"/></g>`; break;
+    case 'shield': icon=`<path d="M${cx-r*.68} ${cy-r*.78} H${cx+r*.68} V${cy+r*.05} Q${cx} ${cy+r*.78} ${cx-r*.68} ${cy+r*.05}Z" fill="none" stroke="${accent}" stroke-width="${Math.max(1.5,size*.055)}"/>`; break;
+    default: icon=star;
+  }
+  const mon = initials({name});
+  return `<div class="shield" style="width:${w}px;height:${h}px;">
+    <svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="${name} badge">
+      <defs><clipPath id="${clip}"><path d="${shield}"/></clipPath></defs>
+      <path d="${shield}" fill="${P}" stroke="${S}" stroke-width="${Math.max(1.4,size*.045)}"/>
+      <g clip-path="url(#${clip})">${field}</g>
+      <g opacity=".98">${icon}</g>
+      <path d="${shield}" fill="none" stroke="${ink}" stroke-opacity=".28" stroke-width="${Math.max(1,size*.022)}"/>
+      <circle cx="${w-5}" cy="7" r="2" fill="${S}" opacity=".8"/>
+    </svg>
+    <div class="initials" style="color:${ink}; font-size:${Math.max(8,size*0.20)}px; top:${h*.31}px; text-shadow:0 1px 1px rgba(0,0,0,.12);">${mon}</div>
+  </div>`;
+}
 function isLight(hex){
   const c = hex.replace("#","");
   const r=parseInt(c.substr(0,2),16), g=parseInt(c.substr(2,2),16), b=parseInt(c.substr(4,2),16);
@@ -16368,12 +16448,17 @@ const SCOUT_LEVELS = ["Unseen", "Watched", "Scouted", "Known"];
 // How long a look takes. A better scouting setup is quicker and more accurate.
 function scoutQuality(){
   const club = clubById(state.clubId);
-  const lvl = (club && club.facilities && club.facilities.youth) || 1;
+  const lvl = (club && club.facilities && club.facilities.recruitment) || 1;
   return clamp(lvl, 1, 5);
 }
-function scoutCount(){ return 1 + Math.floor(scoutQuality() / 2); }   // 1 to 3
+// Recruitment Centre level is deliberately the source of scouting capacity.
+// Youth academy improves the players you produce; recruitment improves the
+// people your department can find and assess.
+function scoutCount(){ return [1,2,3,4,5][scoutQuality()-1] || 1; }
+function scoutWatchLimit(){ return [10,16,24,34,48][scoutQuality()-1] || 10; }
+function scoutAssignmentReturn(){ return [10,14,18,24,30][scoutQuality()-1] || 10; }
 /* A scout can watch several players on one trip — you send him to a region,
-   not to a man. Ten at once is the cap. */
+   not to a man. The Recruitment Centre raises the size of that live watchlist. */
 const MAX_WATCHING = 10;
 
 function scoutState(){
@@ -16595,8 +16680,8 @@ function refreshClubScouting(){
 /* ---- Watching a named player ---- */
 function scoutPlayer(p){
   const sc = scoutState();
-  if(sc.jobs.length >= MAX_WATCHING)
-    return {ok:false, reason:`Your scouts are watching ${MAX_WATCHING} players already.`};
+  if(sc.jobs.length >= scoutWatchLimit())
+    return {ok:false, reason:`Your scouts are watching ${scoutWatchLimit()} players already.`};
   const have = knowledgeOf(p);
   if(have >= 3) return {ok:false, reason:"You already know everything worth knowing about him."};
   if(sc.jobs.some(j=> j.playerId === p.id)) return {ok:false, reason:"A scout is already watching him."};
@@ -16707,7 +16792,7 @@ function runAssignment(a){
   // A scout brings back the best he saw, not a complete list. What counts as
   // best depends on the brief: a man for the first team is judged on what he
   // can do now, a prospect on how far he might go and how much room is left.
-  const take = 8 + scoutQuality() * 2;      // a trip is worth more than four names
+  const take = scoutAssignmentReturn();      // better recruitment departments return more names per trip
   const score = a.looking === "prospects"
     ? p=> potentialOf(p) * 1.0 + (potentialOf(p) - ratingOf(p)) * 0.8 - Math.max(0, p.age - 21) * 3
     : p=> ratingOf(p) + potentialOf(p) * 0.35;
@@ -18025,6 +18110,101 @@ function seedPlayerPersonality(p){
   if((p.age||25) <= 21) return ["Ambitious","Driven","Determined","Quiet"][(hashStr(String(p.id||""))>>>0)%4];
   return ["Professional","Loyal","Determined","Big-game player","Quiet"][(hashStr(String(p.id||""))>>>0)%5];
 }
+/* Canonical club nicknames.  Use established supporter/club nicknames rather
+   than the old generated fallback (e.g. "The Manchester").  Unknown clubs are
+   deliberately left blank rather than inventing a nickname. */
+const CLUB_NICKNAMES = {
+  // Premier League
+  "Arsenal":"The Gunners","Aston Villa":"The Villans","Bournemouth":"The Cherries","Brentford":"The Bees",
+  "Brighton & Hove Albion":"The Seagulls","Chelsea":"The Blues","Coventry City":"The Sky Blues",
+  "Crystal Palace":"The Eagles","Everton":"The Toffees","Fulham":"The Cottagers","Hull City":"The Tigers",
+  "Ipswich Town":"The Tractor Boys","Leeds United":"The Whites","Liverpool":"The Reds","Manchester City":"The Citizens",
+  "Manchester United":"The Red Devils","Newcastle United":"The Magpies","Nottingham Forest":"The Reds",
+  "Sunderland":"The Black Cats","Tottenham Hotspur":"Spurs",
+  // Championship
+  "Birmingham City":"The Blues","Blackburn Rovers":"The Rovers","Bolton Wanderers":"The Trotters",
+  "Bristol City":"The Robins","Burnley":"The Clarets","Cardiff City":"The Bluebirds",
+  "Charlton Athletic":"The Addicks","Derby County":"The Rams","Lincoln City":"The Imps",
+  "Middlesbrough":"The Boro","Millwall":"The Lions","Norwich City":"The Canaries","Portsmouth":"Pompey",
+  "Preston North End":"The Lilywhites","Queens Park Rangers":"The Hoops","Sheffield United":"The Blades",
+  "Southampton":"The Saints","Stoke City":"The Potters","Swansea City":"The Swans","Watford":"The Hornets",
+  "West Bromwich Albion":"The Baggies","West Ham United":"The Hammers","Wolverhampton Wanderers":"Wolves",
+  "Wrexham":"The Red Dragons",
+  // League One
+  "AFC Wimbledon":"The Dons","Barnsley":"The Tykes","Blackpool":"The Seasiders","Bradford City":"The Bantams",
+  "Bromley":"The Ravens","Burton Albion":"The Brewers","Cambridge United":"The U's","Doncaster Rovers":"Donny",
+  "Huddersfield Town":"The Terriers","Leicester City":"The Foxes","Leyton Orient":"The O's","Luton Town":"The Hatters",
+  "Mansfield Town":"The Stags","Milton Keynes Dons":"The Dons","Notts County":"The Magpies","Oxford United":"The U's",
+  "Peterborough United":"The Posh","Plymouth Argyle":"The Pilgrims","Reading":"The Royals",
+  "Sheffield Wednesday":"The Owls","Stevenage":"The Boro","Stockport County":"The Hatters",
+  "Wigan Athletic":"The Latics","Wycombe Wanderers":"The Chairboys",
+  // League Two
+  "Accrington Stanley":"Stanley","Barnet":"The Bees","Bristol Rovers":"The Gas","Cheltenham Town":"The Robins",
+  "Chesterfield":"The Spireites","Colchester United":"The U's","Crawley Town":"The Reds","Crewe Alexandra":"The Railwaymen",
+  "Exeter City":"The Grecians","Fleetwood Town":"The Cod Army","Gillingham":"The Gills","Grimsby Town":"The Mariners",
+  "Newport County":"The Exiles","Northampton Town":"The Cobblers","Oldham Athletic":"The Latics","Port Vale":"The Valiants",
+  "Rochdale":"The Dale","Rotherham United":"The Millers","Salford City":"The Ammies","Shrewsbury Town":"The Shrews",
+  "Swindon Town":"The Robins","Tranmere Rovers":"The Super White Army","Walsall":"The Saddlers","York City":"The Minstermen",
+  // National League
+  "AFC Fylde":"The Coasters","Aldershot Town":"The Shots","Altrincham":"The Robins","Barrow":"The Bluebirds",
+  "Boreham Wood":"The Wood","Boston United":"The Pilgrims","Carlisle United":"The Cumbrians","Eastleigh":"The Spitfires",
+  "FC Halifax Town":"The Shaymen","Forest Green Rovers":"The Green Devils","Gateshead":"The Heed","Harrogate Town":"The Sulphurites",
+  "Hartlepool United":"The Pools","Hornchurch":"The Urchins","Kidderminster Harriers":"The Harriers","Scunthorpe United":"The Iron",
+  "Solihull Moors":"The Moors","Southend United":"The Shrimpers","Sutton United":"The U's","Tamworth":"The Lambs",
+  "Wealdstone":"The Stones","Woking":"The Cards","Worthing":"The Rebels","Yeovil Town":"The Glovers",
+  // National League North / South — established/common usage
+  "AFC Telford United":"The Bucks","Bedford Town":"The Eagles","Brackley Town":"The Saints","Buxton":"The Bucks",
+  "Chester":"The Seals","Chorley":"The Magpies","Darlington":"The Quakers","Harborough Town":"The Bees",
+  "Hebburn Town":"The Hornets","Hednesford Town":"The Pitmen","Hereford":"The Bulls","King's Lynn Town":"The Linnets",
+  "Macclesfield":"The Silkmen","Marine":"The Mariners","Merthyr Town":"The Martyrs","Morecambe":"The Shrimps",
+  "Oxford City":"The Hoops","Radcliffe":"The Boro","Scarborough Athletic":"The Seadogs","Southport":"The Sandgrounders",
+  "South Shields":"The Mariners","Spalding United":"The Tulips","Spennymoor Town":"The Moors","Worksop Town":"The Tigers",
+  "AFC Totton":"The Stags","Bath City":"The Romans","Chelmsford City":"The Clarets","Chesham United":"The Generals",
+  "Chippenham Town":"The Bluebirds","Dagenham & Redbridge":"The Daggers","Dorking Wanderers":"The Wanderers",
+  "Dover Athletic":"The Whites","Eastbourne Borough":"The Sports","Ebbsfleet United":"The Fleet","Enfield Town":"The Towners",
+  "Farnborough":"The Yellows","Hampton & Richmond Borough":"The Beavers","Hemel Hempstead Town":"The Tudors",
+  "Horsham":"The Hornets","Maidenhead United":"The Magpies","Maidstone United":"The Stones","Salisbury":"The Whites",
+  "Slough Town":"The Rebels","Tonbridge Angels":"The Angels","Torquay United":"The Gulls","Weston-super-Mare":"The Seagulls"
+};
+Object.assign(CLUB_NICKNAMES, {
+  // Major European clubs represented in the game; use the commonly recognised local nickname.
+  "Real Madrid":"Los Blancos","Barcelona":"Barça","Atletico Madrid":"Los Colchoneros","Athletic Bilbao":"Los Leones",
+  "Real Sociedad":"La Real","Villarreal":"El Submarino Amarillo","Real Betis":"Los Verdiblancos","Sevilla":"Los Nervionenses",
+  "Valencia":"Los Che","Celta Vigo":"Os Celestes","Osasuna":"Los Rojillos","Rayo Vallecano":"Los Franjirrojos",
+  "Getafe":"Los Azulones","Espanyol":"Periquitos","Alaves":"Babazorros","Elche":"Los Franjiverdes","Levante":"Los Granotas",
+  "Malaga":"Los Boquerones","Racing Santander":"Los Verdiblancos","Deportivo La Coruna":"Los Blanquiazules",
+  "Inter Milan":"Nerazzurri","AC Milan":"Rossoneri","Juventus":"La Vecchia Signora","Napoli":"Gli Azzurri","Roma":"I Giallorossi",
+  "Atalanta":"La Dea","Lazio":"I Biancocelesti","Fiorentina":"La Viola","Bologna":"I Rossoblu","Como":"I Lariani",
+  "Torino":"Il Toro","Udinese":"Le Zebrette","Cagliari":"I Rossoblu","Genoa":"Il Grifone","Lecce":"I Giallorossi",
+  "Parma":"I Crociati","Sassuolo":"I Neroverdi","Venezia":"Arancioneroverdi","Frosinone":"I Ciociari","Monza":"I Brianzoli",
+  "Bayern Munich":"Die Bayern","Borussia Dortmund":"Die Borussen","RB Leipzig":"Die Roten Bullen","Bayer Leverkusen":"Die Werkself",
+  "VfB Stuttgart":"Die Schwaben","Eintracht Frankfurt":"Die Adler","TSG Hoffenheim":"Die Kraichgauer","SC Freiburg":"Die Breisgauer",
+  "Werder Bremen":"Die Werderaner","Union Berlin":"Die Eisernen","FC Augsburg":"Die Fuggerstädter","Borussia Monchengladbach":"Die Fohlen",
+  "Mainz 05":"Die Nullfünfer","1. FC Koln":"Die Geißböcke","Hamburger SV":"Die Rothosen","Schalke 04":"Die Königsblauen",
+  "SV Elversberg":"Die Elv","SC Paderborn":"Die Ostwestfalen",
+  "Paris Saint-Germain":"Les Parisiens","Marseille":"Les Olympiens","Lyon":"Les Gones","Monaco":"Les Monégasques",
+  "Lille":"Les Dogues","Lens":"Les Sang et Or","Nice":"Les Aiglons","Rennes":"Les Rouge et Noir","Strasbourg":"Le Racing",
+  "Toulouse":"Le Téfécé","Brest":"Les Ty-Zefs","Auxerre":"Les Ajaïstes","Angers":"Les Scoïstes","Le Havre":"Les Ciel et Marine",
+  "Lorient":"Les Merlus","Paris FC":"Les Parisiens","Troyes":"Les Troyens","Le Mans":"Les Sang et Or",
+  "Ajax":"De Godenzonen","PSV Eindhoven":"Boeren","Feyenoord":"De club aan de Maas","AZ Alkmaar":"De Kaaskoppen",
+  "FC Twente":"De Tukkers","FC Utrecht":"Utreg","Sparta Rotterdam":"De Kasteelheren","Go Ahead Eagles":"The Eagles",
+  "NEC Nijmegen":"N.E.C.","Heerenveen":"De Superfriezen","Fortuna Sittard":"Fortuna","PEC Zwolle":"De Blauwvingers",
+  "Groningen":"Trots van het Noorden","Telstar":"De Witte Leeuwen","Excelsior":"De Kralingers","Heracles":"Heraclieden",
+  "Volendam":"Het Andere Oranje","NAC Breda":"De Parel van het Zuiden",
+  "Benfica":"As Águias","Porto":"Dragões","Sporting CP":"Leões","Braga":"Os Arsenalistas","Vitoria Guimaraes":"Os Vimaranenses",
+  "Famalicao":"Os Famalicenses","Moreirense":"Os Cónegos","Santa Clara":"Os Açorianos","Estoril":"Canarinhos","Gil Vicente":"Galos",
+  "Casa Pia":"Gansos","Rio Ave":"Vilacondenses","Arouca":"Arouquenses","Estrela Amadora":"Tricolores","Nacional":"Alvinegros",
+  "Alverca":"Os Ribatejanos","Maritimo":"Os Verde-Rubros","Academico de Viseu":"Os Viriatos",
+  "Club Brugge":"Blauw-Zwart","Union Saint-Gilloise":"Les Unionistes","Anderlecht":"Paars-wit","Genk":"De Smurfen",
+  "Antwerp":"The Great Old","Gent":"De Buffalo's","Standard Liege":"Les Rouches","Cercle Brugge":"Groen-Zwart",
+  "Mechelen":"De Kakkers","Charleroi":"Les Zèbres","Westerlo":"De Kemphanen","OH Leuven":"De Studenten",
+  "Sint-Truiden":"De Kanaries","Dender":"De Panda's","La Louviere":"Les Loups","Zulte Waregem":"Essevee",
+  "Celtic":"The Bhoys","Rangers":"The Gers","Hibernian":"Hibs","Heart of Midlothian":"Hearts","Aberdeen":"The Dons",
+  "Dundee United":"The Terrors","Motherwell":"The Steelmen","St Mirren":"The Buddies","Kilmarnock":"The Killie","Dundee":"The Dee",
+  "Falkirk":"The Bairns","Livingston":"The Lions"
+});
+function canonicalClubNickname(name){ return CLUB_NICKNAMES[name] || ""; }
+
 function ensureClubExpansionData(){
   if(!state) return;
   if(!state.clubIdentity || typeof state.clubIdentity !== "object") state.clubIdentity = {};
@@ -18033,7 +18213,7 @@ function ensureClubExpansionData(){
   Object.values(CLUB_META||{}).forEach(c=>{
     if(!c) return;
     if(!c.philosophy) c.philosophy = CLUB_PHILOSOPHIES[(hashStr(c.id||c.name||"club")>>>0)%CLUB_PHILOSOPHIES.length][0];
-    if(!c.nickname) c.nickname = c.customClub ? "The Newcomers" : "The " + (c.name||"Club").split(/\s+/)[0];
+    if(!c.nickname) c.nickname = c.customClub ? "The Newcomers" : canonicalClubNickname(c.name);
     if(!c.boardStyle) c.boardStyle = ["patient","ambitious","financial","youth"][(hashStr(c.id||"")>>>0)%4];
     if(!Number.isFinite(c.supporterBase)) c.supporterBase = clamp(Math.round((c.stature||10)*4), 20, 95);
     if(!c.rivalId || !CLUB_META[c.rivalId] || c.rivalId===c.id){
@@ -18221,6 +18401,210 @@ advanceWeek=async function(){
 // Loaded careers pass through the same upgrade path before their first screen.
 const _enterMainApp390=enterMainApp;
 enterMainApp=function(){ try{ensureClubExpansionData();}catch(e){reportError('BOOT-05',e,'club expansion migration');} return _enterMainApp390(); };
+
+/* =========================================================================
+   GAFFER 3.9.3 — STADIUM DEVELOPMENT
+   The stadium is a destination of its own. Inspired by the depth of chairman
+   sims: four independently developed stands, floodlights, concessions,
+   hospitality, access and pitch improvements. The old single "Stadium" item
+   remains as a legacy aggregate for match-engine compatibility, but is no
+   longer presented as a generic facility upgrade.
+   ========================================================================= */
+const STADIUM_STANDS = [
+  ["main","Main Stand","The traditional home of your season-ticket holders and hospitality."],
+  ["east","East Stand","A full-length stand for general admission and growing crowds."],
+  ["west","West Stand","A major revenue stand with room for premium seating."],
+  ["end","End Stand","The supporters' end — atmosphere first, capacity second."]
+];
+const STAND_CAPACITY_BY_LEVEL = {1:0,2:1500,3:3000,4:5000,5:7500};
+const STAND_COSTS = [700000,2500000,9000000,30000000];
+const STADIUM_PROJECTS = {
+  floodlights:{name:"Floodlights",desc:"Modern floodlighting improves the matchday operation and lets the board stage more attractive evening fixtures.",levels:4,costs:[150000,750000,3000000,12000000]},
+  concessions:{name:"Concessions",desc:"Food, drink and retail points turn a bigger crowd into stronger matchday income.",levels:5,costs:[100000,500000,2000000,8000000,25000000]},
+  hospitality:{name:"Hospitality",desc:"Executive boxes, lounges and premium seating increase commercial matchday revenue.",levels:5,costs:[250000,1000000,5000000,20000000,60000000]},
+  access:{name:"Turnstiles & access",desc:"Better turnstiles, toilets, accessibility and crowd flow improve the ground's matchday standard.",levels:5,costs:[100000,450000,1800000,6500000,18000000]},
+  pitch:{name:"Pitch & playing surface",desc:"A better surface improves the stadium standard and protects the quality of football in poor weather.",levels:5,costs:[200000,800000,3000000,12000000,35000000]}
+};
+
+function ensureStadiumDevelopment(club){
+  if(!club) return null;
+  const legacy = clamp(Number(club.facilities&&club.facilities.stadium)||stadiumLevelFor(club.capacity||0),1,5);
+  if(!club.stadiumDev || typeof club.stadiumDev !== "object") club.stadiumDev={};
+  if(!club.stadiumDev.stands || typeof club.stadiumDev.stands !== "object") club.stadiumDev.stands={};
+  STADIUM_STANDS.forEach(([key])=>{
+    club.stadiumDev.stands[key]=clamp(Number(club.stadiumDev.stands[key])||legacy,1,5);
+  });
+  Object.keys(STADIUM_PROJECTS).forEach(key=>{
+    const max=STADIUM_PROJECTS[key].levels;
+    club.stadiumDev[key]=clamp(Number(club.stadiumDev[key])||1,1,max);
+  });
+  club.stadiumDev.lastProject=club.stadiumDev.lastProject||null;
+  club.stadiumDev.totalInvested=Math.max(0,Number(club.stadiumDev.totalInvested)||0);
+  return club.stadiumDev;
+}
+
+function stadiumStandCapacityLevel(level){ return STAND_CAPACITY_BY_LEVEL[clamp(level,1,5)]||0; }
+function stadiumStandUpgradeCapacity(club, fromLevel, toLevel){
+  const delta=stadiumStandCapacityLevel(toLevel)-stadiumStandCapacityLevel(fromLevel);
+  return Math.max(0,Math.min(80000,Math.round((club.capacity||0)+delta)));
+}
+function stadiumProjectCost(key, level){
+  const p=STADIUM_PROJECTS[key]; if(!p || level>=p.levels) return 0;
+  return p.costs[level-1]||0;
+}
+function stadiumDevelopmentScore(club){
+  const d=ensureStadiumDevelopment(club);
+  const standAvg=STADIUM_STANDS.reduce((n,[k])=>n+d.stands[k],0)/STADIUM_STANDS.length;
+  const raw=standAvg*1.15 + (d.floodlights-1)*0.8 + (d.concessions-1)*0.45 + (d.hospitality-1)*0.55 + (d.access-1)*0.35 + (d.pitch-1)*0.45;
+  return Math.round(clamp(raw,1,10)*10)/10;
+}
+function stadiumIncomeBonus(club){
+  const d=ensureStadiumDevelopment(club);
+  return 1 + Math.max(0,d.concessions-1)*0.025 + Math.max(0,d.hospitality-1)*0.035;
+}
+function stadiumBuild(key){
+  const club=clubById(state.clubId); if(!club) return false;
+  const d=ensureStadiumDevelopment(club);
+  if(!STADIUM_PROJECTS[key]) return false;
+  const level=d[key], cost=stadiumProjectCost(key,level);
+  if(!cost || club.balance<cost) return false;
+  club.balance-=cost; d[key]=level+1; d.totalInvested+=cost; d.lastProject=STADIUM_PROJECTS[key].name;
+  pushNews("Stadium project completed",`${STADIUM_PROJECTS[key].name} has been upgraded to level ${d[key]}.`,'board');
+  saveState(); return true;
+}
+function upgradeStand(key){
+  const club=clubById(state.clubId); if(!club) return false;
+  const d=ensureStadiumDevelopment(club), old=clamp(d.stands[key]||1,1,5);
+  if(old>=5) return false;
+  const cost=STAND_COSTS[old-1]||0;
+  const newCap=stadiumStandUpgradeCapacity(club,old,old+1);
+  if(!cost || club.balance<cost || newCap<=club.capacity || newCap>80000) return false;
+  club.balance-=cost; d.stands[key]=old+1; d.totalInvested+=cost; club.capacity=newCap;
+  club.facilities.stadium=Math.max(club.facilities.stadium||1,Math.max(...Object.values(d.stands)));
+  d.lastProject=`${STADIUM_STANDS.find(x=>x[0]===key)?.[1]||'Stand'} upgrade`;
+  pushNews("Stand expansion completed",`${STADIUM_STANDS.find(x=>x[0]===key)?.[1]||'Stand'} is now level ${old+1}. Capacity rises to ${club.capacity.toLocaleString()}.`,'board');
+  saveState(); return true;
+}
+
+// Stadium upkeep now reflects the actual ground rather than charging only the
+// legacy stadium level. Other facility upkeep remains unchanged.
+facilityUpkeep=function(club){
+  const d=ensureStadiumDevelopment(club); let total=0;
+  Object.keys(club.facilities||{}).forEach(k=>{
+    if(k==='stadium') return;
+    const lvl=(club.facilities[k]||1)-1;
+    total += lvl*lvl*({training:1000,youth:800,medical:700}[k]||800);
+  });
+  const standLevel=STADIUM_STANDS.reduce((n,[k])=>n+d.stands[k],0)/4;
+  total += Math.round(Math.max(0,standLevel-1)*1800);
+  total += Math.max(0,d.floodlights-1)*650;
+  total += Math.max(0,d.concessions-1)*500;
+  total += Math.max(0,d.hospitality-1)*800;
+  total += Math.max(0,d.access-1)*350;
+  total += Math.max(0,d.pitch-1)*550;
+  return Math.round(total);
+};
+
+// Concessions and hospitality feed into the existing gate calculation rather
+// than creating a second revenue stream that could double-count matchday money.
+const _computeAttendance393=computeAttendance;
+computeAttendance=function(homeClub,awayClub,competition){
+  const r=_computeAttendance393(homeClub,awayClub,competition);
+  try{
+    const d=ensureStadiumDevelopment(homeClub);
+    const spendPerHead=Math.max(0,d.concessions-1)*1.15 + Math.max(0,d.hospitality-1)*1.75;
+    r.revenue += Math.round(r.attendance*spendPerHead);
+    if(d.floodlights>=3) r.revenue=Math.round(r.revenue*1.01);
+  }catch(e){}
+  return r;
+};
+
+function stadiumProjectCard(key,club){
+  const d=ensureStadiumDevelopment(club), p=STADIUM_PROJECTS[key], level=d[key], cost=stadiumProjectCost(key,level);
+  const max=level>=p.levels;
+  return `<div class="stadium-project-card"><div class="top"><span class="name">${p.name}</span><span class="lvl">Lv.${level}/${p.levels}</span></div><div class="desc">${p.desc}</div><div class="pips">${Array.from({length:p.levels},(_,i)=>`<div class="pip${i<level?' on':''}"></div>`).join('')}</div>${max?`<div class="stadium-max">Fully developed</div>`:`<button class="stadium-action" data-stadium-project="${key}" ${club.balance<cost?'disabled':''}>Upgrade to Lv.${level+1} — ${fmtMoney(cost)}</button>${club.balance<cost?`<div class="fac-short">Short by ${fmtMoney(cost-club.balance)}</div>`:''}`}</div>`;
+}
+function renderClubStadium(content,club){
+  const d=ensureStadiumDevelopment(club);
+  const avg=(STADIUM_STANDS.reduce((n,[k])=>n+d.stands[k],0)/4).toFixed(1);
+  const projectedIncome=Math.round((club.capacity*(TICKET_PRICE[club.tier]||15))*stadiumIncomeBonus(club));
+  content.innerHTML=`
+    <div class="stadium-hero"><div><div class="section-title" style="margin-top:0">${stadiumDisplayName(club)}</div><div class="sub">Your ground is a long-term project. Build it stand by stand, improve the matchday experience and let the club grow into the stadium.</div></div><div class="stadium-hero-stat"><b>${club.capacity.toLocaleString()}</b><span>capacity</span></div></div>
+    <div class="stadium-summary-grid"><div class="stadium-stat"><b>Stand level</b><span>${avg}/5 average</span></div><div class="stadium-stat"><b>Development</b><span>${stadiumDevelopmentScore(club)}/10</span></div><div class="stadium-stat"><b>Matchday potential</b><span>${fmtMoney(projectedIncome)}</span></div><div class="stadium-stat"><b>Ground upkeep</b><span>${fmtMoney(facilityUpkeep(club))}/week</span></div></div>
+    <div class="stadium-section-title">The four stands</div>
+    <div class="stadium-stands">${STADIUM_STANDS.map(([key,name,desc])=>{const l=d.stands[key],cost=l<5?STAND_COSTS[l-1]:0, nextCap=l<5?stadiumStandUpgradeCapacity(club,l,l+1):club.capacity;return `<div class="stadium-stand-card"><div class="stand-graphic"><div class="stand-roof"></div><div class="stand-seats" style="--rows:${l}"></div><div class="stand-label">${name}</div></div><div class="top"><span class="name">${name}</span><span class="lvl">Lv.${l}/5</span></div><div class="desc">${desc}</div><div class="pips">${[1,2,3,4,5].map(i=>`<div class="pip${i<=l?' on':''}"></div>`).join('')}</div>${l<5?`<div class="fac-next">Capacity ${club.capacity.toLocaleString()} → ${nextCap.toLocaleString()}</div><button class="stadium-action" data-stand="${key}" ${club.balance<cost||nextCap<=club.capacity||nextCap>80000?'disabled':''}>Build / upgrade — ${fmtMoney(cost)}</button>`:`<div class="stadium-max">Stand fully developed</div>`}</div>`;}).join('')}</div>
+    <div class="stadium-section-title">Ground infrastructure</div><div class="stadium-projects">${Object.keys(STADIUM_PROJECTS).map(k=>stadiumProjectCard(k,club)).join('')}</div>
+    <div class="stadium-chairman"><b>Chairman's view</b><div>${d.lastProject?`The board's latest project was <strong>${d.lastProject}</strong>. `:'The board is ready for a long-term ground plan. '}${club.balance<1000000?'Cash is tight, so protect the club\'s operating budget before starting another major project.':club.capacity<10000?'The next priority is turning a modest ground into a proper home advantage.':club.capacity<30000?'The club is ready to think about premium income as well as seats.':'This is now a major asset: keep balancing capacity, matchday income and the cost of running it.'}</div></div>`;
+  content.querySelectorAll('[data-stand]').forEach(b=>b.onclick=()=>{if(upgradeStand(b.dataset.stand)){playClickSound();toast('Stand development complete');render();}});
+  content.querySelectorAll('[data-stadium-project]').forEach(b=>b.onclick=()=>{if(stadiumBuild(b.dataset.stadiumProject)){playClickSound();toast('Stadium project complete');render();}});
+}
+
+// The old generic facilities page now covers football operations only. Stadium
+// investment lives on its own page so it can grow without becoming a dumping
+// ground for unrelated upgrades.
+const _renderClubFacilities393=renderClubFacilities;
+renderClubFacilities=function(content,club){
+  ensureRecruitmentCentre(club);
+  const tracks=[
+    {key:'training',name:'Training ground',desc:'Faster development for the squad, season on season.'},
+    {key:'youth',name:'Youth academy',desc:`Odds of an elite prospect per intake player: ${(academyGemChance(club.facilities.youth)*100).toFixed(1)}%.`},
+    {key:'medical',name:'Medical centre',desc:'Fewer injuries, and shorter lay-offs when they happen.'},
+    {key:'recruitment',name:'Recruitment Centre',desc:`${scoutCount()} scout${scoutCount()===1?'':'s'} · watch up to ${scoutWatchLimit()} players · ${scoutAssignmentReturn()} names returned from a full scouting brief.`}
+  ];
+  content.innerHTML=`<div class="fac-note">Football facilities are separate from the ground. Stadium investment — stands, floodlights, concessions, hospitality, access and pitch — now has its own dedicated Stadium page. The Recruitment Centre controls the size of your scouting department.</div>`;
+  tracks.forEach(track=>{const level=club.facilities[track.key],cost=facilityCost(club.tier,track.key,level),card=document.createElement('div');card.className='facility-card';card.innerHTML=`<div class="top"><span class="name">${track.name}</span><span class="lvl">Lv.${level}/5</span></div><div class="desc">${track.desc}</div><div class="pips">${[1,2,3,4,5].map(i=>`<div class="pip${i<=level?' on':''}"></div>`).join('')}</div>${track.key==='recruitment'&&level<5?`<div class="fac-next">Next level: ${[1,2,3,4,5][level]} scout${[1,2,3,4,5][level]===1?'':'s'} · watch ${[10,16,24,34,48][level]} players · ${[10,14,18,24,30][level]} names per brief</div>`:''}${level<5?`<button ${club.balance<cost?'disabled':''}>Upgrade to Lv.${level+1} — ${fmtMoney(cost)}</button>${club.balance<cost?`<div class="fac-short">Short by ${fmtMoney(cost-club.balance)}</div>`:''}`:'<button disabled>Max level</button>'}`;const btn=card.querySelector('button');if(level<5){btn.onclick=()=>{if(upgradeFacility(track.key)){playClickSound();toast(`${track.name} upgraded to level ${club.facilities[track.key]}`);checkAchievements({});render();}};}content.appendChild(card);});
+};
+
+// Add the dedicated Stadium destination to the existing Club tabs.
+const _renderClub393=renderClub;
+renderClub=function(){
+  if(!state || !state.clubId || !state.squads) return;
+  const club=clubById(state.clubId), el=document.getElementById('screen-club');
+  el.innerHTML=`<div class="section-title" style="margin-top:0">${club.name}</div><div class="tier-tabs" id="clubSubTabs"></div><div id="clubSubContent"></div>`;
+  const tabs=[{value:'overview',label:'Overview'},{value:'boardroom',label:'Boardroom'},{value:'identity',label:'Identity'},{value:'stadium',label:'Stadium'},{value:'facilities',label:'Facilities'},{value:'manager',label:'Manager'},{value:'commercial',label:'Commercial'},{value:'europe',label:'Europe'},{value:'achievements',label:'Awards'},{value:'honours',label:'History'},{value:'records',label:'Records'}];
+  renderPillTabs(document.getElementById('clubSubTabs'),tabs,clubSubTab,v=>{clubSubTab=v;renderClub();});
+  const c=document.getElementById('clubSubContent');
+  if(clubSubTab==='boardroom') renderBoardroom(c,club);
+  else if(clubSubTab==='identity') renderClubIdentity(c,club);
+  else if(clubSubTab==='stadium') renderClubStadium(c,club);
+  else if(clubSubTab==='overview') renderClubOverview(c,club);
+  else if(clubSubTab==='facilities') renderClubFacilities(c,club);
+  else if(clubSubTab==='manager') renderManagerScreen(c);
+  else if(clubSubTab==='commercial') renderCommercial(c,club);
+  else if(clubSubTab==='europe') renderClubEurope(c);
+  else if(clubSubTab==='achievements') renderClubAchievements(c);
+  else if(clubSubTab==='records') renderClubRecords(c);
+  else renderClubHonours(c);
+};
+
+// Make sure old saves and newly-created clubs get a stadium development object
+// before anything tries to render or save it.
+const _ensureClubExpansionData393=ensureClubExpansionData;
+ensureClubExpansionData=function(){
+  _ensureClubExpansionData393();
+  Object.values(CLUB_META||{}).forEach(c=>{if(c && !c.hidden) ensureStadiumDevelopment(c);});
+  if(state) state.stadiumProjects=state.stadiumProjects||{};
+};
+
+/* =========================================================================
+   RECRUITMENT CENTRE
+   Scouting capacity is a club infrastructure investment. Older saves start
+   at level 1 automatically; upgrades persist with the existing facilities
+   object and therefore survive save/load and changes of manager.
+   ========================================================================= */
+function ensureRecruitmentCentre(club){
+  if(!club) return 1;
+  if(!club.facilities || typeof club.facilities !== 'object') club.facilities={stadium:1,training:1,youth:1,medical:1};
+  if(!Number.isFinite(club.facilities.recruitment)) club.facilities.recruitment=1;
+  club.facilities.recruitment=clamp(Math.round(club.facilities.recruitment),1,5);
+  return club.facilities.recruitment;
+}
+const _ensureClubExpansionData394=ensureClubExpansionData;
+ensureClubExpansionData=function(){
+  _ensureClubExpansionData394();
+  Object.values(CLUB_META||{}).forEach(c=>{if(c && !c.hidden) ensureRecruitmentCentre(c);});
+};
+VERSION_NOTES[GAME_VERSION] = "Added a Recruitment Centre to Facilities: each level increases scouts, live players watched and names returned from scouting briefs.";
 
 function boot(){
   // The update check no longer depends on anything above it surviving. It used
