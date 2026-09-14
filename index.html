@@ -1353,6 +1353,13 @@
 
   <div class="modal-backdrop" id="matchBackdrop"><div class="modal fit" id="matchModal"></div></div>
 
+  <div class="modal-backdrop" id="matchHistoryBackdrop">
+    <div class="modal fit" id="matchHistoryModal">
+      <button class="modal-close" id="matchHistoryClose">&times;</button>
+      <div id="matchHistoryBody" class="fit-grow" style="overflow-y:auto;"></div>
+    </div>
+  </div>
+
   <div class="modal-backdrop" id="seasonBackdrop">
     <div class="modal fit" id="seasonModal"><button class="modal-close" id="seasonClose">&times;</button><div id="seasonModalBody" class="fit-grow" style="overflow-y:auto;"></div></div>
   </div>
@@ -4287,7 +4294,7 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "3.8.3";
+const GAME_VERSION = "3.8.4";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
@@ -4820,6 +4827,7 @@ function recordMatchHistory(info){
   const entry = {
     key, season:info.season||state.season, week:info.week||state.week,
     competition, homeId:info.homeId, awayId:info.awayId,
+    managedClubId: info.managedClubId || state.clubId,
     home:home.name, away:away.name,
     hg:Math.max(0, Math.round(info.hg||0)), ag:Math.max(0, Math.round(info.ag||0)),
     possession: info.detail && Number.isFinite(info.detail.possession) ? info.detail.possession : null,
@@ -4843,9 +4851,14 @@ function recordMatchHistory(info){
 
 let resultsSeasonFilter = "current";
 
+function resultManagedHome(entry){
+  if(!entry) return false;
+  return entry.managedClubId ? entry.homeId===entry.managedClubId : entry.homeId===state.clubId;
+}
+
 function resultOutcome(entry){
   if(!entry) return "";
-  const userHome = entry.homeId===state.clubId;
+  const userHome = resultManagedHome(entry);
   const mine = userHome ? entry.hg : entry.ag;
   const theirs = userHome ? entry.ag : entry.hg;
   return mine>theirs ? "W" : mine<theirs ? "L" : "D";
@@ -4854,7 +4867,7 @@ function resultOutcome(entry){
 function renderResults(host){
   const history = ensureMatchHistory().slice().sort((a,b)=>
     (b.season-a.season) || (b.week-a.week) || String(b.key).localeCompare(String(a.key)));
-  const seasons = [...new Set(history.map(x=>x.season))];
+  const seasons = [...new Set(history.map(x=>x.season))].sort((a,b)=>b-a);
   const current = state.season;
   if(!seasons.includes(current)) seasons.unshift(current);
   if(resultsSeasonFilter!=="current" && !seasons.includes(+resultsSeasonFilter)) resultsSeasonFilter="current";
@@ -4864,39 +4877,87 @@ function renderResults(host){
   const wins = rows.filter(x=>resultOutcome(x)==="W").length;
   const draws = rows.filter(x=>resultOutcome(x)==="D").length;
   const losses = rows.filter(x=>resultOutcome(x)==="L").length;
+  const goalsFor = rows.reduce((n,x)=>n+(resultManagedHome(x)?x.hg:x.ag),0);
+  const goalsAgainst = rows.reduce((n,x)=>n+(resultManagedHome(x)?x.ag:x.hg),0);
 
   host.innerHTML = `
-    <div class="section-title" style="margin-top:0;">Season results</div>
+    <div class="section-title" style="margin-top:0;">Match results · Season ${chosen}</div>
+    <div style="font-size:12px;color:var(--text-dim);margin:-4px 0 8px;">Tap any score to open the full match report.</div>
     <div class="tier-tabs" id="resultsSeasonTabs"></div>
     <div class="stat-row" style="margin-top:8px;">
       <div class="stat-box"><div class="v num">${played}</div><div class="l">Played</div></div>
       <div class="stat-box"><div class="v num">${wins}-${draws}-${losses}</div><div class="l">W-D-L</div></div>
-      <div class="stat-box"><div class="v num">${rows.reduce((n,x)=>n+(x.homeId===state.clubId?x.hg:x.ag),0)}-${rows.reduce((n,x)=>n+(x.homeId===state.clubId?x.ag:x.hg),0)}</div><div class="l">Goals F-A</div></div>
+      <div class="stat-box"><div class="v num">${goalsFor}-${goalsAgainst}</div><div class="l">Goals F-A</div></div>
     </div>
     ${rows.length ? `<div class="list" style="margin-top:10px;">${rows.map(x=>{
-      const out=resultOutcome(x), userHome=x.homeId===state.clubId;
-      const mine=userHome?x.hg:x.ag, theirs=userHome?x.ag:x.hg;
+      const out=resultOutcome(x), userHome=resultManagedHome(x);
       const opp=userHome?x.away:x.home;
       const score=`${x.hg}-${x.ag}`;
-      const cards=x.homeCards||x.awayCards ? ` · 🟨 ${x.homeCards||0}-${x.awayCards||0}` : "";
       const stats=[];
       if(x.possession!==null) stats.push(`${x.possession}-${100-x.possession}% poss`);
       if(x.homeShots!==null) stats.push(`${x.homeShots}-${x.awayShots} shots`);
       if(x.motm) stats.push(`POTM ${x.motm}`);
-      return `<div class="row" style="display:block; padding:11px 0; border-bottom:1px solid var(--line);">
+      const scoreStyle=out==='W'?'var(--good)':out==='L'?'var(--bad)':'var(--accent)';
+      return `<div class="row match-result-row" data-history-key="${String(x.key).replace(/"/g,'&quot;')}" style="display:block; padding:11px 0; border-bottom:1px solid var(--line); cursor:pointer;"> 
         <div style="display:flex; align-items:center; gap:8px;">
-          <span class="num" style="width:22px; font-weight:800; color:${out==='W'?'var(--good)':out==='L'?'var(--bad)':'var(--accent)'};">${out}</span>
+          <span class="num" style="width:22px; font-weight:800; color:${scoreStyle};">${out}</span>
           <span style="flex:1; min-width:0;"><b>${userHome?"H":"A"} · ${opp}</b><br><span style="font-size:11px; color:var(--text-dim);">${x.competition} · wk ${x.week}</span></span>
-          <span class="num" style="font-size:18px;">${score}</span>
+          <span class="num history-score" style="font-size:18px; color:${scoreStyle}; text-decoration:underline; text-underline-offset:3px;">${score}</span>
         </div>
-        <div style="margin:6px 0 0 30px; font-size:11px; color:var(--text-dim);">${stats.join(" · ") || "Match stats unavailable"}${cards}</div>
-        ${(x.scorersHome.length||x.scorersAway.length) ? `<div style="margin:4px 0 0 30px; font-size:11px;">⚽ ${(x.scorersHome||[]).concat(x.scorersAway||[]).join(", ")}</div>` : ""}
+        <div style="margin:6px 0 0 30px; font-size:11px; color:var(--text-dim);">${stats.join(" · ") || "Match stats available in report"}</div>
+        ${(x.scorersHome?.length||x.scorersAway?.length) ? `<div style="margin:4px 0 0 30px; font-size:11px;">⚽ ${(x.scorersHome||[]).concat(x.scorersAway||[]).join(", ")}</div>` : ""}
       </div>`;
     }).join("")}</div>` : `<div class="empty-hint">No matches recorded for Season ${chosen} yet.</div>`}`;
 
   renderPillTabs(document.getElementById("resultsSeasonTabs"),
-    seasons.map(se=>({value:se, label:`S${se}`})),
+    seasons.map(se=>({value:se, label:`Season ${se}`})),
     chosen, se=>{ resultsSeasonFilter=se; renderTable(); });
+
+  host.querySelectorAll(".match-result-row").forEach(row=>{
+    row.onclick=()=>{
+      playClickSound();
+      const entry=ensureMatchHistory().find(x=>x && x.key===row.dataset.historyKey);
+      if(entry) showHistoricalMatchSummary(entry);
+    };
+  });
+}
+
+function showHistoricalMatchSummary(entry){
+  if(!entry) return;
+  const body=document.getElementById("matchHistoryBody");
+  const userHome=resultManagedHome(entry);
+  const homeScore=entry.hg, awayScore=entry.ag;
+  const result=resultOutcome(entry);
+  const resultLabel=result==="W"?"WIN":result==="L"?"LOSS":"DRAW";
+  const resultClass=result==="W"?"var(--good)":result==="L"?"var(--bad)":"var(--accent)";
+  const cardLine=(entry.homeCards||entry.awayCards) ? `${entry.homeCards||0} 🟨  ·  ${entry.awayCards||0} 🟨` : "0 🟨  ·  0 🟨";
+  const scorersH=(entry.scorersHome||[]).length ? entry.scorersHome.join(", ") : "None";
+  const scorersA=(entry.scorersAway||[]).length ? entry.scorersAway.join(", ") : "None";
+  body.innerHTML=`
+    <div style="text-align:center; padding:4px 0 12px;">
+      <div style="font-size:11px;color:var(--text-dim);">Season ${entry.season} · Week ${entry.week} · ${entry.competition}</div>
+      <div style="font-size:12px;font-weight:800;color:${resultClass};letter-spacing:.12em;margin-top:6px;">${resultLabel}</div>
+      <div style="display:flex;align-items:center;justify-content:center;gap:18px;margin-top:12px;">
+        <div style="width:35%;font-weight:700;">${entry.home}</div>
+        <div class="num" style="font-size:32px;font-weight:900;white-space:nowrap;">${homeScore} - ${awayScore}</div>
+        <div style="width:35%;font-weight:700;">${entry.away}</div>
+      </div>
+    </div>
+    <div class="section-title">Match stats</div>
+    <div class="match-stats">
+      <div class="ms-row"><span>${entry.possession!==null?entry.possession:"—"}%</span><span class="ms-label">Possession</span><span>${entry.possession!==null?100-entry.possession:"—"}%</span></div>
+      <div class="ms-bar"><div class="ms-fill" style="width:${entry.possession!==null?entry.possession:50}%; background:${(clubById(entry.homeId)||{}).primary||"var(--accent)"};"></div><div class="ms-fill" style="width:${entry.possession!==null?100-entry.possession:50}%; background:${(clubById(entry.awayId)||{}).primary||"var(--text-dim)"};"></div></div>
+      <div class="ms-row"><span>${entry.homeShots!==null?entry.homeShots:"—"}</span><span class="ms-label">Shots</span><span>${entry.awayShots!==null?entry.awayShots:"—"}</span></div>
+      <div class="ms-row"><span>${entry.homeCards||0} 🟨</span><span class="ms-label">Cards</span><span>${entry.awayCards||0} 🟨</span></div>
+    </div>
+    ${entry.attendance!==null ? `<div class="attendance-line">🎟 ${Number(entry.attendance).toLocaleString()} attendance${entry.gate!==null?` · gate ${fmtMoney(entry.gate)}`:""}</div>` : ""}
+    <div class="section-title">Goals</div>
+    <div class="youth-item"><span><b>${entry.home}</b></span><span>${scorersH}</span></div>
+    <div class="youth-item"><span><b>${entry.away}</b></span><span>${scorersA}</span></div>
+    ${entry.motm ? `<div class="section-title">Player of the match</div><div class="motm"><div><div class="motm-label">POTM</div><div class="motm-name">${entry.motm}</div></div></div>` : ""}
+    <button class="btn-primary" id="historyCloseBtn" style="margin-top:14px;">Close</button>`;
+  document.getElementById("historyCloseBtn").onclick=()=>document.getElementById("matchHistoryBackdrop").classList.remove("open");
+  document.getElementById("matchHistoryBackdrop").classList.add("open");
 }
 
 /* ---- News / inbox ---- */
@@ -12874,11 +12935,11 @@ function renderTable(){
     activeTableTier, tierId=>{ activeTableTier = tierId; renderTable(); });
   renderPillTabs(document.getElementById("tableViewTabs"), [
     {value:"table", label:"Table"},
+    {value:"results", label:"Results"},
     {value:"goals", label:"Goals"},
     {value:"assists", label:"Assists"},
     {value:"cleanSheets", label:"Clean sheets"},
     {value:"rating", label:"Ratings"},
-    {value:"results", label:"Results"},
   ], tableView, v=>{ tableView = v; renderTable(); });
 
   const viewBody = document.getElementById("tableViewBody");
@@ -14503,6 +14564,9 @@ document.querySelectorAll(".nav-btn").forEach(btn=>{
     document.getElementById("screen-"+btn.dataset.screen).classList.add("active");
   });
 });
+document.getElementById("matchHistoryClose").onclick = ()=> document.getElementById("matchHistoryBackdrop").classList.remove("open");
+document.getElementById("matchHistoryBackdrop").addEventListener("click", e=>{ if(e.target.id==="matchHistoryBackdrop") document.getElementById("matchHistoryBackdrop").classList.remove("open"); });
+
 document.getElementById("playerClose").onclick = closePlayerModal;
 document.getElementById("playerBackdrop").addEventListener("click", e=>{ if(e.target.id==="playerBackdrop") closePlayerModal(); });
 document.getElementById("seasonClose").onclick = ()=>{
