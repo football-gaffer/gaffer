@@ -3142,14 +3142,19 @@ function generateFixtures(clubIds){
 
 let _trCache = {}, _trKey = "";
 function teamRatings(squad){
-  // Cached per club per week: this is called twice per fixture, and every call
-  // walked the whole squad several times over.
+  // The managed club is never cached: the manager's selected XI can change
+  // during the week (and during a live match), so using a cached whole-squad
+  // rating would make formation, selection and substitutions cosmetic.
   if(squad && squad.length && squad[0].clubId){
     const key = state.season + ":" + state.week;
     if(_trKey !== key){ _trCache = {}; _trKey = key; }
     const cid = squad[0].clubId;
+    if(cid === state.clubId){
+      const xi = selectStartingXI(squad);
+      return _teamRatingsRaw(xi);
+    }
     if(_trCache[cid]) return {attack:_trCache[cid].attack, defense:_trCache[cid].defense};
-    const computed = _teamRatingsRaw(squad);
+    const computed = _teamRatingsRaw(selectStartingXI(squad));
     _trCache[cid] = computed;
     return {attack:computed.attack, defense:computed.defense};
   }
@@ -4380,7 +4385,7 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "3.9.10";
+const GAME_VERSION = "3.9.11";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
@@ -18694,7 +18699,7 @@ ensureClubExpansionData=function(){
   _ensureClubExpansionData394();
   Object.values(CLUB_META||{}).forEach(c=>{if(c && !c.hidden) ensureRecruitmentCentre(c);});
 };
-VERSION_NOTES[GAME_VERSION] = "Match balance update: your selected XI, player fitness and morale now have a clearer effect on results. No badge changes.";
+VERSION_NOTES[GAME_VERSION] = "Match reliability fix: match ratings now always use the selected XI for the managed club, so selection, formation and fitness changes actually affect results. No badge changes.";
 
 function boot(){
   // The update check no longer depends on anything above it surviving. It used
