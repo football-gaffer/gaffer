@@ -4372,7 +4372,7 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "3.9.4";
+const GAME_VERSION = "3.9.5";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
@@ -11220,7 +11220,7 @@ function crestSVG(club, size){
     case 'shield': icon=`<path d="M${cx-r*.68} ${cy-r*.78} H${cx+r*.68} V${cy+r*.05} Q${cx} ${cy+r*.78} ${cx-r*.68} ${cy+r*.05}Z" fill="none" stroke="${accent}" stroke-width="${Math.max(1.5,size*.055)}"/>`; break;
     default: icon=star;
   }
-  const mon = initials({name});
+  const mon = initials(name);
   return `<div class="shield" style="width:${w}px;height:${h}px;">
     <svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="${name} badge">
       <defs><clipPath id="${clip}"><path d="${shield}"/></clipPath></defs>
@@ -18604,7 +18604,7 @@ ensureClubExpansionData=function(){
   _ensureClubExpansionData394();
   Object.values(CLUB_META||{}).forEach(c=>{if(c && !c.hidden) ensureRecruitmentCentre(c);});
 };
-VERSION_NOTES[GAME_VERSION] = "Added a Recruitment Centre to Facilities: each level increases scouts, live players watched and names returned from scouting briefs.";
+VERSION_NOTES[GAME_VERSION] = "Fixed club-selection crash caused by the redesigned crest initials renderer receiving the club object instead of its name.";
 
 function boot(){
   // The update check no longer depends on anything above it surviving. It used
