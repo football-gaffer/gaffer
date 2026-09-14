@@ -3157,15 +3157,23 @@ function teamRatings(squad){
 }
 
 function _teamRatingsRaw(squad){
-  const attackers = squad.filter(p=>p.pos==="FW"||p.pos==="MD");
-  const defenders = squad.filter(p=>p.pos==="DF"||p.pos==="GK");
+  // The manager's actual XI determines the user's match strength. Keep this
+  // here rather than changing the startup path or the save format.
+  let playing = Array.isArray(squad) ? squad.slice() : [];
+  if(playing.length > 11 && playing[0] && playing[0].clubId === state.clubId){
+    try{
+      const xi = selectStartingXI(playing);
+      if(Array.isArray(xi) && xi.length) playing = xi;
+    }catch(e){}
+  }
+  const attackers = playing.filter(p=>p.pos==="FW"||p.pos==="MD");
+  const defenders = playing.filter(p=>p.pos==="DF"||p.pos==="GK");
   const avg = (arr,fn)=> arr.length? arr.reduce((s,p)=>s+fn(p),0)/arr.length : 10;
   const base = { attack: avg(attackers, p=>(p.shooting+p.passing+p.pace)/3),
                  defense: avg(defenders, p=>(p.defending+p.physical)/2) };
-  // Playing men out of position costs you. Only your own side is judged this
-  // way — the AI picks by position anyway, and its shape isn't yours to break.
-  if(squad.length && squad[0].clubId === state.clubId){
-    const pen = shapePenalty(squad);
+  // Playing men out of position costs you. Only your own selected XI is judged.
+  if(playing.length && playing[0].clubId === state.clubId){
+    const pen = shapePenalty(playing);
     base.attack *= pen;
     base.defense *= pen;
   }
@@ -4372,7 +4380,7 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "3.9.9";
+const GAME_VERSION = "3.9.10";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
@@ -6188,7 +6196,9 @@ function moraleMultiplier(clubId){
   if(!sq || sq.length===0) return 1;
   let sum = 0;
   for(let i=0;i<sq.length;i++) sum += (sq[i].morale || 12);
-  return clamp(0.9 + (sum/sq.length - 11)*0.014, 0.86, 1.12);
+  // Morale is neutral at 12: good morale helps, low morale hurts,
+  // without giving the baseline squad a hidden bonus.
+  return clamp(1 + (sum/sq.length - 12)*0.012, 0.92, 1.10);
 }
 
 /* =========================================================================
@@ -8429,15 +8439,17 @@ function applyFatigue(clubId, hadFixture){
 function fatigueMultiplier(clubId){
   const sq = state.squads[clubId];
   if(!sq || !sq.length) return 1;
-  // Average across the squad rather than picking an XI: selecting one means a
-  // sort, and this runs for both sides of every fixture in the world each week.
+  // Only the players actually taking part should determine match fitness.
+  // AI clubs remain neutral here because they do not expose a managed XI.
+  const xi = clubId === state.clubId ? selectStartingXI(sq) : sq.slice(0,11);
+  if(!xi.length) return 1;
   let sum = 0, n = 0;
-  for(let i=0;i<sq.length;i++){
-    if(!isAvailable(sq[i])) continue;
-    sum += (sq[i].condition === undefined ? 100 : sq[i].condition); n++;
-  }
+  xi.forEach(p=>{
+    if(!isAvailable(p)) return;
+    sum += (p.condition === undefined ? 100 : p.condition); n++;
+  });
   if(!n) return 1;
-  return clamp(0.86 + (sum/n/100) * 0.16, 0.86, 1.02);
+  return clamp(0.88 + (sum/n/100) * 0.12, 0.88, 1.00);
 }
 
 /* ---- 5. Prize money ---- */
@@ -18682,7 +18694,7 @@ ensureClubExpansionData=function(){
   _ensureClubExpansionData394();
   Object.values(CLUB_META||{}).forEach(c=>{if(c && !c.hidden) ensureRecruitmentCentre(c);});
 };
-VERSION_NOTES[GAME_VERSION] = "Cleaned approved badge artwork: removed surrounding generated nicknames/club-name text so only the badge and its internal contents are shown; preserved the approved artwork.";
+VERSION_NOTES[GAME_VERSION] = "Match balance update: your selected XI, player fitness and morale now have a clearer effect on results. No badge changes.";
 
 function boot(){
   // The update check no longer depends on anything above it surviving. It used
