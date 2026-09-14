@@ -4381,7 +4381,7 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "3.11.0";
+const GAME_VERSION = "3.10.8";
 // 3.10.4 badge artwork rebuild: replaces generic placeholder crests with club-specific fixed PNG artwork; the 19 approved reference badges are preserved unchanged.
 const VERSION_KEY = "gaffer_version_seen";
 
@@ -11199,35 +11199,125 @@ function badgeAssetForClub(club){
     (c && c.id && APPROVED_BADGE_ASSETS_NORMALIZED[badgeLookupKey(c.id)]);
 }
 function crestSVG(club, size){
-  size=size||40; const w=size,h=Math.round(size*1.12);
-  let c=club;
-  if(typeof c==='string') c=CLUB_META[slugify(c)]||Object.values(CLUB_META).find(x=>x&&x.name===c)||{name:c};
-  else if(c&&!c.name&&c.id) c=CLUB_META[c.id]||c;
-  const name=String(c&&c.name||'Club'), P=c&&c.primary||'#34495e', S=c&&c.secondary||'#f4f4f4';
-  const approvedAsset=badgeAssetForClub(c);
-  if(approvedAsset) return `<div class="shield" style="width:${size}px;height:${h}px;display:flex;align-items:center;justify-content:center;"><img src="${approvedAsset}" alt="${name} badge" style="width:${size}px;height:${h}px;object-fit:contain;display:block;"></div>`;
-  // Clean generic crests for every other club. Stable per club, but selected from
-  // a pool of generic geometric football-badge designs rather than AI artwork.
-  const n=Math.abs(hashStr(name)), style=n%8, cx=w/2, trim=isLight(S)?'#20242b':S, ink=isLight(P)?'#171717':'#fff';
-  const id=`generic_${n}_${size}`, abbr=initials(name).slice(0,3), line=Math.max(1,size*.03);
-  const shapes=[
-    `M${w*.08} ${h*.08}Q${cx} 0 ${w*.92} ${h*.08}V${h*.63}Q${cx} ${h*.98} ${w*.08} ${h*.63}Z`,
-    `M${cx} ${h*.03}L${w*.9} ${h*.14}V${h*.61}Q${w*.83} ${h*.86} ${cx} ${h*.98}Q${w*.17} ${h*.86} ${w*.1} ${h*.61}V${h*.14}Z`,
-    `M${w*.1} ${h*.05}H${w*.9}V${h*.68}Q${cx} ${h*.98} ${w*.1} ${h*.68}Z`,
-    `M${cx} ${h*.02}L${w*.94} ${h*.3}L${w*.78} ${h*.88}L${cx} ${h*.98}L${w*.22} ${h*.88}L${w*.06} ${h*.3}Z`,
-    `M${w*.12} ${h*.08}Q${cx} 0 ${w*.88} ${h*.08}V${h*.58}Q${cx} ${h*.9} ${w*.12} ${h*.58}Z`,
-    `M${w*.09} ${h*.09}H${w*.91}V${h*.66}L${cx} ${h*.96}L${w*.09} ${h*.66}Z`,
-    `M${w*.08} ${h*.12}Q${cx} 0 ${w*.92} ${h*.12}V${h*.58}Q${cx} ${h*.91} ${w*.08} ${h*.58}Z`,
-    `M${w*.14} ${h*.05}H${w*.86}V${h*.62}Q${w*.82} ${h*.84} ${cx} ${h*.97}Q${w*.18} ${h*.84} ${w*.14} ${h*.62}Z`];
-  const shape=shapes[style];
-  const stripe=`<path d="M${w*.28}0L${w*.43}0L${w*.58}${h}H${w*.43}Z" fill="${S}" opacity=".45"/><path d="M${w*.57}0L${w*.7}0L${w*.85}${h}H${w*.72}Z" fill="${S}" opacity=".22"/>`;
-  const bars=`<path d="M0 ${h*.27}H${w}V${h*.36}H0Z" fill="${S}" opacity=".42"/><path d="M0 ${h*.57}H${w}V${h*.64}H0Z" fill="${S}" opacity=".28"/>`;
-  const circle=`<circle cx="${cx}" cy="${h*.43}" r="${size*.13}" fill="none" stroke="${trim}" stroke-width="${Math.max(1,size*.022)}"/><path d="M${cx-size*.13} ${h*.43}l${size*.065}-${size*.065} ${size*.065} ${size*.035} ${size*.01} ${size*.075}-${size*.03}" fill="none" stroke="${trim}" stroke-width="${Math.max(.8,size*.016)}"/>`;
-  const center=style%3===0?stripe:style%3===1?bars:`<circle cx="${cx}" cy="${h*.43}" r="${size*.2}" fill="${S}" opacity=".12"/>`;
-  const labelY=h*.76;
-  return `<div class="shield" style="width:${w}px;height:${h}px;"><svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="${name} badge"><defs><clipPath id="${id}"><path d="${shape}"/></clipPath></defs><path d="${shape}" fill="#0e1116" opacity=".25" transform="translate(0 ${Math.max(1,size*.02)})"/><path d="${shape}" fill="${P}" stroke="${trim}" stroke-width="${Math.max(1.5,size*.045)}"/><g clip-path="url(#${id})">${center}</g><path d="${shape}" fill="none" stroke="${ink}" stroke-width="${line}" opacity=".35"/>${circle}<rect x="${w*.18}" y="${labelY-h*.075}" width="${w*.64}" height="${h*.105}" rx="${size*.02}" fill="#11151b" opacity=".86" stroke="${S}" stroke-width="${Math.max(.6,size*.014)}"/><text x="${cx}" y="${labelY}" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="${Math.max(7,size*.15)}" font-weight="800" letter-spacing="${Math.max(.4,size*.01)}" fill="#fff">${abbr}</text></svg></div>`;
-}
+  size = size||40;
+  const w=size, h=size*1.12;
+  let resolvedClub = club;
+  if(typeof resolvedClub === 'string'){
+    resolvedClub = CLUB_META[slugify(resolvedClub)] || Object.values(CLUB_META).find(x=>x && x.name===resolvedClub) || {name:resolvedClub};
+  } else if(resolvedClub && !resolvedClub.name && resolvedClub.id){
+    resolvedClub = CLUB_META[resolvedClub.id] || resolvedClub;
+  }
+  const name = String(resolvedClub && resolvedClub.name || 'Club');
+  const P = resolvedClub && resolvedClub.primary || '#234';
+  const S = resolvedClub && resolvedClub.secondary || '#fff';
+  const approvedAsset = badgeAssetForClub(resolvedClub);
+  if(approvedAsset){
+    return `<div class="shield" style="width:${size}px;height:${Math.round(size*1.12)}px;display:flex;align-items:center;justify-content:center;">`+
+      `<img src="${approvedAsset}" alt="${name} badge" style="width:${size}px;height:${Math.round(size*1.12)}px;object-fit:contain;display:block;">`+
+      `</div>`;
+  }
+  const motif = badgeMotif(name);
+  const style = Math.abs(hashStr(name))%8;
+  const lightP = isLight(P), lightS = isLight(S);
+  const ink = lightP ? '#171717' : '#fff';
+  const accent = lightS ? P : S;
+  const gold = '#d8b35a';
+  const dark = '#101318';
+  const cx=w/2, cy=h*.43, r=Math.min(w,h)*.255;
+  const clip = `crestClip_${Math.abs(hashStr(name))}_${size}`;
+  const uid = `crest_${Math.abs(hashStr(name))}_${size}`;
+  const abbr = initials(name);
 
+  // A richer, football-crest-style family: layered border, central device,
+  // scroll/ribbon treatment and club-specific heraldic motif.  The artwork is
+  // generated from club data and remains original rather than copying a real crest.
+  const shapes = [
+    `M ${w*.08} ${h*.08} Q ${w*.5} ${0} ${w*.92} ${h*.08} V ${h*.58} Q ${w*.88} ${h*.86} ${w*.5} ${h*.98} Q ${w*.12} ${h*.86} ${w*.08} ${h*.58} Z`,
+    `M ${w*.1} ${h*.06} H ${w*.9} V ${h*.62} Q ${w*.5} ${h*.98} ${w*.1} ${h*.62} Z`,
+    `M ${w*.5} ${h*.025} L ${w*.91} ${h*.13} V ${h*.61} Q ${w*.87} ${h*.82} ${w*.5} ${h*.98} Q ${w*.13} ${h*.82} ${w*.09} ${h*.61} V ${h*.13} Z`,
+    `M ${w*.5} ${h*.02} C ${w*.76} ${h*.08} ${w*.91} ${h*.18} ${w*.91} ${h*.38} V ${h*.63} Q ${w*.84} ${h*.88} ${w*.5} ${h*.98} Q ${w*.16} ${h*.88} ${w*.09} ${h*.63} V ${h*.38} C ${w*.09} ${h*.18} ${w*.24} ${h*.08} ${w*.5} ${h*.02} Z`
+  ];
+  const shield = shapes[style%shapes.length];
+  const field = style%3===0
+    ? `<path d="M0 0 H${w} V${h*.28} Q${w*.5} ${h*.42} 0 ${h*.28}Z" fill="${S}" opacity=".92"/>
+       <path d="M0 ${h*.74} Q${w*.5} ${h*.58} ${w} ${h*.74} V${h} H0Z" fill="${S}" opacity=".38"/>`
+    : style%3===1
+    ? `<path d="M0 0 H${w} L0 ${h}Z" fill="${S}" opacity=".86"/>
+       <path d="M${w} 0 V${h} L${w*.48} ${h} Z" fill="${P}" opacity=".30"/>`
+    : `<rect x="${w*.39}" y="0" width="${w*.22}" height="${h}" fill="${S}" opacity=".86"/>
+       <path d="M0 ${h*.67} H${w} V${h*.76} H0Z" fill="${S}" opacity=".35"/>`;
+
+  const line = Math.max(1.2,size*.035);
+  const small = Math.max(1,size*.025);
+  let icon='';
+  const eye = `<circle cx="${cx+r*.22}" cy="${cy-r*.12}" r="${Math.max(0.8,size*.018)}" fill="${P}"/>`;
+  switch(motif){
+    case 'cannon':
+      icon=`<g fill="none" stroke="${accent}" stroke-width="${Math.max(1.5,size*.045)}" stroke-linecap="round"><circle cx="${cx-r*.2}" cy="${cy+.05*r}" r="${r*.48}"/><path d="M${cx-r*.05} ${cy-r*.16} L${cx+r*.78} ${cy-r*.66} L${cx+r*.9} ${cy-r*.48} L${cx+r*.1} ${cy+.03*r}"/><path d="M${cx-r*.7} ${cy+r*.54} H${cx+r*.35}"/></g>`; break;
+    case 'hammers':
+      icon=`<g stroke="${accent}" stroke-width="${Math.max(2,size*.065)}" stroke-linecap="round"><path d="M${cx-r*.72} ${cy-r*.62} L${cx+r*.68} ${cy+r*.62}"/><path d="M${cx+r*.72} ${cy-r*.62} L${cx-r*.68} ${cy+r*.62}"/></g><g stroke="${accent}" stroke-width="${Math.max(2,size*.075)}"><path d="M${cx-r*.86} ${cy-r*.73} h${r*.28}"/><path d="M${cx+r*.58} ${cy-r*.73} h${r*.28}"/></g>`; break;
+    case 'ship':
+      icon=`<g fill="${accent}"><path d="M${cx-r*.92} ${cy+r*.28} Q${cx} ${cy+r*.66} ${cx+r*.92} ${cy+r*.28} L${cx+r*.67} ${cy+r*.62} Q${cx} ${cy+r*.87} ${cx-r*.67} ${cy+r*.62}Z"/><path d="M${cx-r*.06} ${cy-r*.72} H${cx+.07*r} V${cy+r*.29} H${cx-r*.06}Z"/><path d="M${cx+.08*r} ${cy-r*.68} L${cx+r*.64} ${cy-r*.23} H${cx+.08*r}Z"/></g>`; break;
+    case 'bird': case 'magpie': case 'eagle': case 'canary': case 'cockerel':
+      icon=`<path d="M${cx-r*.82} ${cy+.18*r} Q${cx-r*.48} ${cy-r*.7} ${cx+.02*r} ${cy-r*.2} Q${cx+r*.45} ${cy-r*.72} ${cx+r*.88} ${cy-r*.45} Q${cx+r*.5} ${cy-r*.1} ${cx+r*.16} ${cy+.22*r} L${cx+r*.75} ${cy+.62*r} Q${cx} ${cy+r*.86} ${cx-r*.82} ${cy+.18*r}Z" fill="${accent}"/>${eye}`; break;
+    case 'lion': case 'wolf':
+      icon=`<path d="M${cx-r*.62} ${cy-r*.56} L${cx-r*.2} ${cy-r*.82} L${cx} ${cy-r*.55} L${cx+r*.2} ${cy-r*.82} L${cx+r*.62} ${cy-r*.56} L${cx+r*.8} ${cy-r*.08} L${cx+r*.58} ${cy+r*.56} L${cx} ${cy+r*.84} L${cx-r*.58} ${cy+r*.56} L${cx-r*.8} ${cy-r*.08}Z" fill="${accent}"/>`; break;
+    case 'fox':
+      icon=`<path d="M${cx-r*.8} ${cy-r*.72} L${cx-r*.1} ${cy-r*.48} L${cx} ${cy-r*.83} L${cx+r*.1} ${cy-r*.48} L${cx+r*.8} ${cy-r*.72} L${cx+r*.6} ${cy+.42*r} Q${cx} ${cy+r*.88} ${cx-r*.6} ${cy+.42*r}Z" fill="${accent}"/>`; break;
+    case 'bee':
+      icon=`<ellipse cx="${cx}" cy="${cy}" rx="${r*.5}" ry="${r*.72}" fill="${accent}"/><path d="M${cx-r*.45} ${cy-r*.15} H${cx+r*.45} M${cx-r*.45} ${cy+.22*r} H${cx+r*.45}" stroke="${P}" stroke-width="${Math.max(1,size*.04)}"/><path d="M${cx-r*.38} ${cy-r*.55} Q${cx-r*1.0} ${cy-r*.95} ${cx-r*.68} ${cy-r*.18} M${cx+r*.38} ${cy-r*.55} Q${cx+r*1.0} ${cy-r*.95} ${cx+r*.68} ${cy-r*.18}" fill="none" stroke="${accent}" stroke-width="${Math.max(1,size*.045)}"/>`; break;
+    case 'tree': case 'leaf':
+      icon=`<path d="M${cx} ${cy-r*.8} C${cx-r*.95} ${cy-r*.18} ${cx-r*.62} ${cy+r*.36} ${cx} ${cy+r*.2} C${cx+r*.62} ${cy+r*.36} ${cx+r*.95} ${cy-r*.18} ${cx} ${cy-r*.8}Z" fill="${accent}"/><path d="M${cx} ${cy+r*.05} V${cy+r*.78}" stroke="${accent}" stroke-width="${Math.max(1.5,size*.05)}"/>`; break;
+    case 'ram':
+      icon=`<path d="M${cx-r*.72} ${cy-r*.16} Q${cx-r*.95} ${cy-r*.84} ${cx-r*.26} ${cy-r*.68} Q${cx} ${cy-r*.95} ${cx+r*.26} ${cy-r*.68} Q${cx+r*.95} ${cy-r*.84} ${cx+r*.72} ${cy-r*.16} L${cx+r*.48} ${cy+r*.56} H${cx-r*.48}Z" fill="${accent}"/>`; break;
+    case 'rose': case 'fleur':
+      icon=`<g fill="${accent}"><circle cx="${cx}" cy="${cy}" r="${r*.25}"/><circle cx="${cx-r*.34}" cy="${cy-r*.18}" r="${r*.29}"/><circle cx="${cx+r*.34}" cy="${cy-r*.18}" r="${r*.29}"/><circle cx="${cx}" cy="${cy-r*.42}" r="${r*.29}"/></g><path d="M${cx} ${cy+r*.18} V${cy+r*.78}" stroke="${accent}" stroke-width="${Math.max(1.5,size*.05)}"/>`; break;
+    case 'tower':
+      icon=`<g fill="${accent}"><path d="M${cx-r*.42} ${cy+r*.78} V${cy-r*.58} H${cx+r*.42} V${cy+r*.78}Z"/><path d="M${cx-r*.6} ${cy-r*.58} H${cx+r*.6} L${cx+r*.42} ${cy-r*.85} H${cx-r*.42}Z"/></g>`; break;
+    case 'dragon':
+      icon=`<path d="M${cx-r*.8} ${cy+r*.5} Q${cx-r*.25} ${cy-r*.8} ${cx+r*.62} ${cy-r*.24} L${cx+r*.9} ${cy-r*.64} L${cx+r*.76} ${cy+.02*r} L${cx+r*.96} ${cy+r*.42} L${cx+r*.3} ${cy+r*.18} Q${cx+r*.02} ${cy+r*.72} ${cx-r*.8} ${cy+r*.5}Z" fill="${accent}"/>`; break;
+    case 'shamrock':
+      icon=`<g fill="${accent}"><circle cx="${cx-r*.3}" cy="${cy-r*.2}" r="${r*.34}"/><circle cx="${cx+r*.3}" cy="${cy-r*.2}" r="${r*.34}"/><circle cx="${cx}" cy="${cy-r*.58}" r="${r*.34}"/><path d="M${cx} ${cy-r*.18} V${cy+r*.78}" stroke="${accent}" stroke-width="${Math.max(1.5,size*.06)}"/></g>`; break;
+    case 'wave':
+      icon=`<path d="M${cx-r*.92} ${cy-r*.12} Q${cx-r*.45} ${cy-r*.64} ${cx} ${cy-r*.12} T${cx+r*.92} ${cy-r*.12} V${cy+r*.25} Q${cx+r*.45} ${cy-r*.2} ${cx} ${cy+r*.25} T${cx-r*.92} ${cy+r*.25}Z" fill="${accent}"/>`; break;
+    case 'cherries':
+      icon=`<g fill="${accent}"><circle cx="${cx-r*.3}" cy="${cy+.38*r}" r="${r*.3}"/><circle cx="${cx+r*.3}" cy="${cy+.38*r}" r="${r*.3}"/><path d="M${cx-r*.3} ${cy+.18*r} Q${cx-r*.04} ${cy-r*.72} ${cx} ${cy-r*.84} M${cx+r*.3} ${cy+.18*r} Q${cx+r*.04} ${cy-r*.72} ${cx} ${cy-r*.84}" fill="none" stroke="${accent}" stroke-width="${Math.max(1,size*.05)}"/></g>`; break;
+    case 'crown':
+      icon=`<path d="M${cx-r*.78} ${cy-r*.55} L${cx-r*.45} ${cy+.15} L${cx} ${cy-r*.28} L${cx+r*.45} ${cy+.15} L${cx+r*.78} ${cy-r*.55} L${cx+r*.58} ${cy+r*.62} H${cx-r*.58}Z" fill="${accent}"/>`; break;
+    case 'diamond':
+      icon=`<path d="M${cx} ${cy-r*.88} L${cx+r*.72} ${cy} L${cx} ${cy+r*.88} L${cx-r*.72} ${cy}Z" fill="${accent}"/>`; break;
+    case 'cross':
+      icon=`<g fill="${accent}"><rect x="${cx-r*.12}" y="${cy-r*.76}" width="${r*.24}" height="${r*1.52}"/><rect x="${cx-r*.76}" y="${cy-r*.12}" width="${r*1.52}" height="${r*.24}"/></g>`; break;
+    case 'trident':
+      icon=`<g stroke="${accent}" stroke-width="${Math.max(1.5,size*.055)}" fill="none" stroke-linecap="round"><path d="M${cx} ${cy+r*.78} V${cy-r*.65}"/><path d="M${cx-r*.62} ${cy-r*.35} Q${cx-r*.35} ${cy-r*.82} ${cx} ${cy-r*.35} Q${cx+r*.35} ${cy-r*.82} ${cx+r*.62} ${cy-r*.35}"/><path d="M${cx-r*.62} ${cy-r*.35} V${cy-r*.72} M${cx+r*.62} ${cy-r*.35} V${cy-r*.72}"/></g>`; break;
+    default:
+      icon=`<path d="M${cx} ${cy-r} L${cx+r*.28} ${cy-r*.3} L${cx+r} ${cy-r*.3} L${cx+r*.42} ${cy+.1*r} L${cx+r*.62} ${cy+r} L${cx} ${cy+.45*r} L${cx-r*.62} ${cy+r} L${cx-r*.42} ${cy+.1*r} L${cx-r} ${cy-r*.3} L${cx-r*.28} ${cy-r*.3}Z" fill="${accent}"/>`;
+  }
+
+  // The approved look has a clear club monogram on the badge itself. Keep it
+  // high-contrast and place it in a small heraldic panel rather than floating
+  // text over the artwork.
+  const monY = h*.74;
+  const ribbon = `<path d="M${w*.16} ${monY-h*.09} L${w*.84} ${monY-h*.09} L${w*.79} ${monY+h*.02} L${w*.21} ${monY+h*.02} Z" fill="${dark}" opacity=".78" stroke="${S}" stroke-width="${small}"/>
+    <text x="${cx}" y="${monY}" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="${Math.max(7,size*.17)}" font-weight="800" letter-spacing="${Math.max(.4,size*.012)}" fill="#fff">${abbr}</text>`;
+  const topMark = style%2===0
+    ? `<circle cx="${cx}" cy="${h*.13}" r="${Math.max(2,size*.045)}" fill="${gold}" stroke="${S}" stroke-width="${small}"/>`
+    : `<path d="M${cx-size*.07} ${h*.1} L${cx} ${h*.055} L${cx+size*.07} ${h*.1} L${cx} ${h*.145}Z" fill="${gold}"/>`;
+
+  return `<div class="shield" style="width:${w}px;height:${h}px;">
+    <svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="${name} badge">
+      <defs><clipPath id="${clip}"><path d="${shield}"/></clipPath><filter id="${uid}" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="${Math.max(.5,size*.018)}" stdDeviation="${Math.max(.4,size*.012)}" flood-opacity=".22"/></filter></defs>
+      <path d="${shield}" fill="${dark}" opacity=".35" transform="translate(0 ${Math.max(1,size*.025)})"/>
+      <path d="${shield}" fill="${P}" stroke="${gold}" stroke-width="${Math.max(1.5,size*.045)}" filter="url(#${uid})"/>
+      <g clip-path="url(#${clip})">${field}</g>
+      <path d="${shield}" fill="none" stroke="${S}" stroke-width="${Math.max(1,size*.025)}" opacity=".95"/>
+      <path d="${shield}" fill="none" stroke="${ink}" stroke-opacity=".28" stroke-width="${small}"/>
+      <g opacity=".98">${icon}</g>
+      ${ribbon}
+      ${topMark}
+    </svg>
+  </div>`;
+}
 function isLight(hex){
   const c = hex.replace("#","");
   const r=parseInt(c.substr(0,2),16), g=parseInt(c.substr(2,2),16), b=parseInt(c.substr(4,2),16);
