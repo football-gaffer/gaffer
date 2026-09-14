@@ -1286,6 +1286,21 @@
 
   body.reduced-motion *{animation-duration:0.01ms !important; animation-iteration-count:1 !important; transition-duration:0.01ms !important;}
 </style>
+<style id="v390-expansion-css">
+.player-personality{display:flex;justify-content:space-between;gap:12px;padding:9px 11px;margin:8px 0 12px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.025);font-size:12px}
+.player-personality span{color:var(--text-dim)} .player-personality b{font-weight:650}
+.identity-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.identity-card{border:1px solid var(--line);border-radius:12px;padding:12px;background:rgba(255,255,255,.025)}
+.identity-card .label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);margin-bottom:4px}
+.identity-card .value{font-weight:650}
+.confidence-card{border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px}
+.confidence-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.confidence-bar{height:7px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:8px}
+.confidence-fill{height:100%;border-radius:99px}
+.identity-field{margin-top:10px}.identity-field label{display:block;font-size:11px;color:var(--text-dim);margin-bottom:5px}
+.identity-field input,.identity-field select{width:100%;box-sizing:border-box;padding:9px;border-radius:9px;border:1px solid var(--line);background:var(--panel);color:var(--text)}
+@media(max-width:560px){.identity-grid{grid-template-columns:1fr}}
+</style>
 </head>
 <body>
 <div id="shell">
@@ -3738,7 +3753,7 @@ function confirmDialog(title, body){
    previous copy is kept so a bad migration can be rolled back rather than
    costing somebody a ten-season career.
    ========================================================================= */
-const SAVE_SCHEMA = 4;
+const SAVE_SCHEMA = 5;
 
 // Each entry brings a save from (key - 1) up to (key). Keep them small, keep
 // them defensive, and never assume a field is present.
@@ -3755,6 +3770,14 @@ const SAVE_MIGRATIONS = {
     // Match-by-match history was added after launch. Keep old careers intact and
     // give the Results screen a real array to work with.
     if(!Array.isArray(g.matchHistory)) g.matchHistory = [];
+  },
+  5: function(g){
+    if(!g.clubIdentity || typeof g.clubIdentity !== "object") g.clubIdentity = {};
+    if(g.boardConfidence === undefined) g.boardConfidence = 60;
+    if(g.supporterConfidence === undefined) g.supporterConfidence = 60;
+    Object.values(g.squads||{}).forEach(sq=>(sq||[]).forEach(pl=>{
+      if(!pl.personality) pl.personality = seedPlayerPersonality(pl);
+    }));
   },
   3: function(g){
     // Listings, morale and discipline could all arrive undefined from old saves.
@@ -3866,7 +3889,7 @@ const P_KEYS = ["id","clubId","first","last","age","pos","isReal","nat","potenti
   // These were all being assigned and then silently dropped on every reload —
   // form and ambition since the beginning, the last three since they were added.
   "form","ambition","avatarSeed","lastRating","quitting",
-  "csTeam","lastFinedWeek","renewalHandled","lastRequestWeek","lastUnhappyDecisionWeek","seasonsFree","pos2","pos3","pos4","training","agreedToLeave","careerApps","careerGoals",
+  "csTeam","lastFinedWeek","renewalHandled","lastRequestWeek","lastUnhappyDecisionWeek","seasonsFree","pos2","pos3","pos4","training","agreedToLeave","careerApps","careerGoals","personality",
 ];
 
 function packPlayer(p){
@@ -3934,7 +3957,7 @@ function unpackFixtures(packed){
 }
 
 // Only the mutable half of a club record is worth writing.
-const CLUB_SAVE_KEYS = ["balance","stature","capacity","facilities","hidden","shadowOf",
+const CLUB_SAVE_KEYS = ["balance","stature","capacity","facilities","hidden","shadowOf","nickname","rivalId","philosophy","boardStyle","supporterBase",
   "justRelegated","justPromoted","tier","wageBudget","transferEmbargo","pointsDeduction",
   "inAdministration","manager","vacantSince"];
 function packClubMeta(meta){
@@ -3951,6 +3974,9 @@ function packClubMeta(meta){
       o.primary = c.primary;
       o.secondary = c.secondary;
       o.crestVariant = c.crestVariant;
+      o.nickname = c.nickname;
+      o.rivalId = c.rivalId;
+      o.philosophy = c.philosophy;
     }
     out[id] = o;
   });
@@ -4339,11 +4365,12 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "3.8.6";
+const GAME_VERSION = "3.9.0";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
 const VERSION_NOTES = {
+  "3.9.0": "Club-building expansion: richer club identity, boardroom and supporter confidence, manager reputation growth, player personalities and rivalries, with save migration for long careers.",
   "3.8.6": "Create Your Own Club colour scheme: choose primary and secondary club colours, used across the custom crest, kits and club presentation; colours persist in saves.",
   "3.8.5": "Create Your Own Club mode: choose a National League North or South club to replace, give the new club its own name, and start with a fresh squad in that league.",
   "3.8.3": "Results are now immutable once a match finishes, and every match involving you is saved into a season-by-season Results tab with score, competition, possession, shots, cards, scorers and player of the match. Older careers are backfilled safely.",
@@ -13464,6 +13491,7 @@ function openPlayerModal(p, isOwn){
       <span class="num">${captaincyRating(p)}</span>
       ${p.isCaptain?'<span class="mkt-badge cap">CAPTAIN</span>':p.isViceCaptain?'<span class="mkt-badge vice">VICE</span>':''}
     </div>
+    ${p.personality ? `<div class="player-personality"><span>Personality</span><b>${p.personality}</b></div>` : ""}
     ${(p.finesReceived||0) ? `<div style="font-size:11px; color:var(--text-dim); margin-bottom:8px;">Fined ${p.finesReceived} time${p.finesReceived>1?"s":""} at this club</div>` : ""}
     ${p.promisedStart ? `<div class="injury-box" style="border-color:rgba(232,185,78,0.4);">🤝 <b>Promised a starting place</b> — until week ${p.promisedStart.untilWeek}. Break it and he'll know.</div>` : ""}
     ${p.injuryWeeks>0 ? `<div class="injury-box">🚑 <b>${p.injuryName||"Injured"}</b> — out for ${p.injuryWeeks} more week${p.injuryWeeks>1?"s":""}${p.injuryProne?' · <span style="color:var(--bad);">injury prone</span>':''}</div>` : ""}
@@ -17968,6 +17996,231 @@ document.getElementById("gameMenuTitleBtn").onclick = ()=>{
     }
   });
 })();
+
+
+/* =========================================================================
+   3.9.0 CLUB & CAREER EXPANSION
+   The additions below are deliberately layered over the mature 3.8.x systems:
+   no fixture, transfer, save, sack or promotion code is replaced. New data is
+   deterministic/backfilled and every wrapper saves after changing persistent
+   state. This is important for careers already ten seasons old.
+   ========================================================================= */
+const CLUB_PHILOSOPHIES = [
+  ["Community club","Build locally, develop players and keep the supporters close."],
+  ["Youth first","Prioritise academy graduates and player development."],
+  ["Smart recruitment","Find undervalued players and sell well."],
+  ["Win at all costs","Results, trophies and aggressive squad building come first."],
+  ["Possession football","Technical players and controlled football define the club."],
+];
+const PLAYER_PERSONALITIES = [
+  "Professional","Driven","Loyal","Ambitious","Leader","Temperamental",
+  "Quiet","Determined","Mercenary","Big-game player"
+];
+function seedPlayerPersonality(p){
+  if(!p) return "Professional";
+  const score = (p.passing||0)+(p.defending||0)+(p.physical||0)+(p.morale||12);
+  if(p.isCaptain || score >= 62) return ((hashStr(String(p.id||""))>>>0)%100)<55 ? "Leader" : "Professional";
+  if((p.potential||p.overall||0)-(p.overall||0) >= 6) return ((hashStr(String(p.id||""))>>>0)%100)<55 ? "Ambitious" : "Driven";
+  if((p.morale||12) <= 7) return ((hashStr(String(p.id||""))>>>0)%2) ? "Temperamental" : "Mercenary";
+  if((p.age||25) <= 21) return ["Ambitious","Driven","Determined","Quiet"][(hashStr(String(p.id||""))>>>0)%4];
+  return ["Professional","Loyal","Determined","Big-game player","Quiet"][(hashStr(String(p.id||""))>>>0)%5];
+}
+function ensureClubExpansionData(){
+  if(!state) return;
+  if(!state.clubIdentity || typeof state.clubIdentity !== "object") state.clubIdentity = {};
+  if(!Number.isFinite(state.boardConfidence)) state.boardConfidence = 60;
+  if(!Number.isFinite(state.supporterConfidence)) state.supporterConfidence = 60;
+  Object.values(CLUB_META||{}).forEach(c=>{
+    if(!c) return;
+    if(!c.philosophy) c.philosophy = CLUB_PHILOSOPHIES[(hashStr(c.id||c.name||"club")>>>0)%CLUB_PHILOSOPHIES.length][0];
+    if(!c.nickname) c.nickname = c.customClub ? "The Newcomers" : "The " + (c.name||"Club").split(/\s+/)[0];
+    if(!c.boardStyle) c.boardStyle = ["patient","ambitious","financial","youth"][(hashStr(c.id||"")>>>0)%4];
+    if(!Number.isFinite(c.supporterBase)) c.supporterBase = clamp(Math.round((c.stature||10)*4), 20, 95);
+    if(!c.rivalId || !CLUB_META[c.rivalId] || c.rivalId===c.id){
+      const peers = Object.values(CLUB_META).filter(x=>x && x.id!==c.id && !x.hidden && x.tier===c.tier);
+      if(peers.length) c.rivalId = peers.sort((a,b)=>Math.abs((a.stature||10)-(c.stature||10))-Math.abs((b.stature||10)-(c.stature||10)))[0].id;
+    }
+  });
+  const club = clubById(state.clubId);
+  if(club){
+    state.clubIdentity.nickname = club.nickname;
+    state.clubIdentity.rivalId = club.rivalId;
+    state.clubIdentity.philosophy = club.philosophy;
+  }
+  Object.values(state.squads||{}).forEach(sq=>(sq||[]).forEach(p=>{
+    if(!p.personality) p.personality = seedPlayerPersonality(p);
+  }));
+}
+function supporterConfidence(){
+  const club=clubById(state.clubId); if(!club) return 50;
+  const base=Number(club.supporterBase||60);
+  const board=Number(boardConfidence());
+  const ss=state.seasonStats||{};
+  const form=ss.played ? ((ss.won||0)*2 + (ss.drawn||0) - (ss.lost||0)*2) : 0;
+  const rival=state.lastRivalResult;
+  let v=base*0.45 + board*0.35 + 20;
+  v += clamp(form,-20,20);
+  if(rival==='win') v+=8; else if(rival==='loss') v-=8;
+  return clamp(Math.round(v),0,100);
+}
+function updateClubConfidence(){
+  if(!state || !state.clubId) return;
+  ensureClubExpansionData();
+  state.boardConfidence = clamp(Math.round(boardConfidence()),0,100);
+  state.supporterConfidence = supporterConfidence();
+}
+function confidenceLabel(v){ return v>=80?"Excellent":v>=65?"Positive":v>=50?"Stable":v>=30?"Concerned":"Critical"; }
+function confidenceFill(v){ return `<div class="confidence-bar"><div class="confidence-fill" style="width:${v}%;background:${v>=65?'var(--good)':v>=45?'var(--accent)':'var(--bad)'}"></div></div>`; }
+function renderBoardroom(content, club){
+  updateClubConfidence();
+  const b=state.boardConfidence, f=state.supporterConfidence, m=state.manager||{};
+  const rival=clubById(club.rivalId);
+  const objective=state.boardObjective;
+  const nextFacility=(Object.keys(club.facilities||{}).map(k=>club.facilities[k]).sort((a,b)=>a-b)[0]||1);
+  content.innerHTML=`
+    <div class="section-title" style="margin-top:0">Board confidence</div>
+    <div class="confidence-card"><div class="confidence-row"><b>${confidenceLabel(b)}</b><span class="num">${b}%</span></div>${confidenceFill(b)}<div class="sub" style="margin-top:7px">${objective?objective.text:"The board are assessing the new season."}</div></div>
+    <div class="section-title">Supporters</div>
+    <div class="confidence-card"><div class="confidence-row"><b>${confidenceLabel(f)}</b><span class="num">${f}%</span></div>${confidenceFill(f)}<div class="sub" style="margin-top:7px">Fans respond to results, rivals, recruitment and the club's identity.</div></div>
+    <div class="identity-grid">
+      <div class="identity-card"><div class="label">Manager reputation</div><div class="value">${m.reputation||1}/20</div><div class="sub">${m.unemployed?"Currently unemployed":"In the dugout"}</div></div>
+      <div class="identity-card"><div class="label">Club reputation</div><div class="value">${clamp(Math.round((club.stature||10)),1,20)}/20</div><div class="sub">Grows through results, promotion and development.</div></div>
+    </div>
+    <div class="section-title">The board's priorities</div>
+    <div class="confidence-card"><b>${club.boardStyle==='youth'?'Youth development':club.boardStyle==='financial'?'Financial stability':club.boardStyle==='ambitious'?'First-team success':'Long-term stability'}</b><div class="sub" style="margin-top:5px">Requests and spending are judged against the club's finances, stature and current performance.</div></div>
+    ${rival?`<div class="section-title">Next rivalry test</div><div class="confidence-card"><div class="confidence-row"><b>${rival.name}</b><span>${club.nickname||''}</span></div><div class="sub" style="margin-top:5px">Results against your main rival have extra weight with supporters.</div></div>`:""}
+    <div class="section-title">Facilities</div>
+    <div class="sub">Training Lv.${club.facilities.training} · Youth Lv.${club.facilities.youth} · Medical Lv.${club.facilities.medical} · Stadium Lv.${club.facilities.stadium}</div>`;
+}
+function renderClubIdentity(content, club){
+  const peers=Object.values(CLUB_META).filter(c=>c&&!c.hidden&&c.id!==club.id&&c.tier===club.tier).sort((a,b)=>a.name.localeCompare(b.name));
+  const ph=CLUB_PHILOSOPHIES.find(x=>x[0]===(club.philosophy||""))||CLUB_PHILOSOPHIES[0];
+  content.innerHTML=`
+    <div class="section-title" style="margin-top:0">Club identity</div>
+    <div class="identity-grid">
+      <div class="identity-card"><div class="label">Club</div><div class="value">${club.name}</div><div class="sub">${club.customClub?"Created club":"Established club"}</div></div>
+      <div class="identity-card"><div class="label">Nickname</div><div class="value">${club.nickname||"—"}</div><div class="sub">Used in news and supporter stories.</div></div>
+      <div class="identity-card"><div class="label">Colours</div><div class="value"><span style="display:inline-block;width:18px;height:18px;border-radius:50%;vertical-align:middle;background:${club.primary||'#777'}"></span> <span style="display:inline-block;width:18px;height:18px;border-radius:50%;vertical-align:middle;background:${club.secondary||'#fff'};border:1px solid var(--line)"></span></div><div class="sub">Permanent club colours.</div></div>
+      <div class="identity-card"><div class="label">Philosophy</div><div class="value">${ph[0]}</div><div class="sub">${ph[1]}</div></div>
+    </div>
+    <div class="section-title">Change identity</div>
+    <div class="identity-field"><label>Nickname</label><input id="clubNicknameInput" maxlength="28" value="${String(club.nickname||'').replace(/"/g,'&quot;')}"></div>
+    <div class="identity-field"><label>Philosophy</label><select id="clubPhilosophyInput">${CLUB_PHILOSOPHIES.map(x=>`<option value="${x[0]}" ${x[0]===club.philosophy?'selected':''}>${x[0]}</option>`).join('')}</select></div>
+    <div class="identity-field"><label>Main rival</label><select id="clubRivalInput">${peers.map(c=>`<option value="${c.id}" ${c.id===club.rivalId?'selected':''}>${c.name}</option>`).join('')}</select></div>
+    <button class="btn-primary" id="saveClubIdentity" style="margin-top:12px">Save club identity</button>`;
+  document.getElementById('saveClubIdentity').onclick=()=>{
+    const n=document.getElementById('clubNicknameInput').value.trim();
+    const ph=document.getElementById('clubPhilosophyInput').value;
+    const r=document.getElementById('clubRivalInput').value;
+    if(n.length<2){toast('Enter a nickname',2200);return;}
+    club.nickname=n; club.philosophy=ph; club.rivalId=r;
+    state.clubIdentity={nickname:n,philosophy:ph,rivalId:r};
+    saveState(); render(); toast('Club identity updated');
+  };
+}
+// Preserve all existing club tabs while adding two deeper career tabs.
+const _renderClub390 = renderClub;
+renderClub = function(){
+  if(!state || !state.clubId || !state.squads) return;
+  const club=clubById(state.clubId), el=document.getElementById('screen-club');
+  el.innerHTML=`<div class="section-title" style="margin-top:0">${club.name}</div><div class="tier-tabs" id="clubSubTabs"></div><div id="clubSubContent"></div>`;
+  const tabs=[{value:'overview',label:'Overview'},{value:'boardroom',label:'Boardroom'},{value:'identity',label:'Identity'},{value:'facilities',label:'Facilities'},{value:'manager',label:'Manager'},{value:'commercial',label:'Commercial'},{value:'europe',label:'Europe'},{value:'achievements',label:'Awards'},{value:'honours',label:'History'},{value:'records',label:'Records'}];
+  renderPillTabs(document.getElementById('clubSubTabs'),tabs,clubSubTab,v=>{clubSubTab=v;renderClub();});
+  const c=document.getElementById('clubSubContent');
+  if(clubSubTab==='boardroom') renderBoardroom(c,club);
+  else if(clubSubTab==='identity') renderClubIdentity(c,club);
+  else if(clubSubTab==='overview') renderClubOverview(c,club);
+  else if(clubSubTab==='facilities') renderClubFacilities(c,club);
+  else if(clubSubTab==='manager') renderManagerScreen(c);
+  else if(clubSubTab==='commercial') renderCommercial(c,club);
+  else if(clubSubTab==='europe') renderClubEurope(c);
+  else if(clubSubTab==='achievements') renderClubAchievements(c);
+  else if(clubSubTab==='records') renderClubRecords(c);
+  else renderClubHonours(c);
+};
+// Created-club setup now includes the identity pieces that matter over a long save.
+const _openCreateClubDetails390=openCreateClubDetails;
+openCreateClubDetails=function(replacementClub){
+  const body=document.getElementById('createClubBody'), sub=document.getElementById('createClubSub'), back=document.getElementById('createClubBack'), confirm=document.getElementById('createClubConfirm'), backdrop=document.getElementById('createClubBackdrop');
+  const peers=Object.values(CLUB_META).filter(c=>c&&!c.hidden&&c.id!==replacementClub.id&&c.tier===replacementClub.tier).sort((a,b)=>a.name.localeCompare(b.name));
+  body.innerHTML=`<div class="create-club-note"><b>Replacing ${replacementClub.name}</b><br>${leagueDisplayName(replacementClub.tier)} · you inherit its league place, ground and starting budget. The squad is rebuilt for your club.</div>
+    <div class="identity-field"><label>Club name</label><input id="createClubNameInput" maxlength="40" placeholder="e.g. Thames FC"></div>
+    <div class="identity-field"><label>Nickname</label><input id="createClubNickname" maxlength="28" placeholder="e.g. The Thames"></div>
+    <div class="identity-field"><label>Club philosophy</label><select id="createClubPhilosophy">${CLUB_PHILOSOPHIES.map(x=>`<option value="${x[0]}">${x[0]} — ${x[1]}</option>`).join('')}</select></div>
+    <div class="identity-field"><label>Main rival</label><select id="createClubRival">${peers.map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}</select></div>
+    <div class="create-club-field"><label>Club colours</label><div class="create-club-colours"><div class="create-club-colour"><label for="createClubPrimary">Primary</label><input id="createClubPrimary" type="color" value="#1D4ED8"></div><div class="create-club-colour"><label for="createClubSecondary">Secondary</label><input id="createClubSecondary" type="color" value="#FFFFFF"></div></div>
+    <div class="create-club-palette"><button type="button" class="create-club-swatch" data-p="#1D4ED8" data-s="#FFFFFF" style="background:linear-gradient(135deg,#1D4ED8 50%,#FFFFFF 50%)"></button><button type="button" class="create-club-swatch" data-p="#DC2626" data-s="#FFFFFF" style="background:linear-gradient(135deg,#DC2626 50%,#FFFFFF 50%)"></button><button type="button" class="create-club-swatch" data-p="#000000" data-s="#FACC15" style="background:linear-gradient(135deg,#000000 50%,#FACC15 50%)"></button><button type="button" class="create-club-swatch" data-p="#065F46" data-s="#FFFFFF" style="background:linear-gradient(135deg,#065F46 50%,#FFFFFF 50%)"></button></div></div>`;
+  sub.textContent='Build the identity you will carry through the entire career.';
+  const input=document.getElementById('createClubNameInput'); const nick=document.getElementById('createClubNickname');
+  body.querySelectorAll('.create-club-swatch').forEach(b=>b.onclick=()=>{document.getElementById('createClubPrimary').value=b.dataset.p;document.getElementById('createClubSecondary').value=b.dataset.s;playClickSound();});
+  const check=()=>{const name=input.value.trim();const dup=Object.values(CLUB_META).some(c=>c&&c.name&&c.name.toLowerCase()===name.toLowerCase());confirm.disabled=name.length<2||dup;};
+  input.addEventListener('input',check); check();
+  back.onclick=()=>{backdrop.classList.remove('open');showCreateClubSelect();};
+  confirm.onclick=()=>{const name=input.value.trim(), dup=Object.values(CLUB_META).some(c=>c&&c.name&&c.name.toLowerCase()===name.toLowerCase());if(name.length<2||dup){toast(dup?'That club name is already in use':'Enter a club name',2400);return;} backdrop.classList.remove('open'); chooseDifficulty(Object.assign({},replacementClub,{name}),{name,replacedClubName:replacementClub.name,primary:document.getElementById('createClubPrimary').value.toUpperCase(),secondary:document.getElementById('createClubSecondary').value.toUpperCase(),nickname:nick.value.trim()||'The Newcomers',philosophy:document.getElementById('createClubPhilosophy').value,rivalId:document.getElementById('createClubRival').value});};
+  backdrop.classList.add('open'); setTimeout(()=>input.focus(),50);
+};
+// Ensure new careers receive identity immediately and old saves are upgraded without reset.
+const _newCareer390=newCareer;
+newCareer=function(clubId, customIdentity){
+  _newCareer390(clubId,customIdentity);
+  const c=clubById(clubId); if(c){ if(customIdentity){c.nickname=customIdentity.nickname||'The Newcomers';c.philosophy=customIdentity.philosophy||c.philosophy;c.rivalId=customIdentity.rivalId||c.rivalId;} }
+  ensureClubExpansionData();
+  Object.values(state.squads||{}).forEach(sq=>(sq||[]).forEach(p=>{if(!p.personality)p.personality=seedPlayerPersonality(p);}));
+};
+// A manager's reputation now changes with the story of each season, not just when a job is accepted.
+const _runSeasonRollover390=runSeasonRollover;
+runSeasonRollover=function(){
+  const before=state&&state.manager?state.manager.reputation:0;
+  const result=_runSeasonRollover390();
+  try{
+    ensureClubExpansionData();
+    const m=state.manager, tier=getUserTier(), table=computeTable(tier), row=table.find(r=>r.id===state.clubId);
+    if(m&&row){
+      const pos=table.findIndex(r=>r.id===state.clubId)+1, size=table.length||20;
+      let delta=0;
+      if(result&&result.promoted) delta+=2;
+      if(pos<=Math.max(1,Math.ceil(size*.2))) delta+=2;
+      if(pos>size*.8) delta-=1;
+      if(m.careerTrophies) delta+=1;
+      m.reputation=clamp((before||m.reputation||5)+delta,1,20);
+      if(delta>0) pushNews('Manager reputation rises',`Your reputation has grown to ${m.reputation}/20 after another season in management.`,'board');
+      else if(delta<0) pushNews('Manager reputation slips',`Your reputation falls to ${m.reputation}/20 after a difficult season.`,'board');
+    }
+    updateClubConfidence();
+    saveState();
+  }catch(e){reportError('SEA-05',e,'career reputation update');}
+  return result;
+};
+// Rival matches influence supporter confidence. This hook only records the result;
+// the existing match engine remains the authority on the score.
+const _recordMatchHistory390=recordMatchHistory;
+recordMatchHistory=function(info){
+  _recordMatchHistory390(info);
+  try{
+    const c=clubById(state.clubId); if(c && (info.homeId===c.rivalId || info.awayId===c.rivalId)){
+      const mine=info.homeId===c.id?info.hg:info.ag, opp=info.homeId===c.id?info.ag:info.hg;
+      state.lastRivalResult=mine>opp?'win':mine<opp?'loss':'draw'; updateClubConfidence();
+    }
+  }catch(e){}
+};
+// Personality has a small, bounded effect on post-match morale. It never overrides the
+// existing morale system and therefore cannot destabilise long careers.
+const _applyMorale390=applyMoraleFromResult;
+applyMoraleFromResult=function(clubId,won,drew){
+  _applyMorale390(clubId,won,drew);
+  const sq=state.squads[clubId]||[];
+  sq.forEach(p=>{ if(p.personality==='Professional'||p.personality==='Determined') p.morale=clamp(p.morale+(won?0.25:!drew?-0.25:0),1,20); });
+};
+// Confidence is persisted after every normal week, including weeks that end a season.
+const _advanceWeek390=advanceWeek;
+advanceWeek=async function(){
+  const r=await _advanceWeek390();
+  try{ensureClubExpansionData();updateClubConfidence();saveState();}catch(e){reportError('SIM-06',e,'club confidence update');}
+  return r;
+};
+// Loaded careers pass through the same upgrade path before their first screen.
+const _enterMainApp390=enterMainApp;
+enterMainApp=function(){ try{ensureClubExpansionData();}catch(e){reportError('BOOT-05',e,'club expansion migration');} return _enterMainApp390(); };
 
 function boot(){
   // The update check no longer depends on anything above it surviving. It used
