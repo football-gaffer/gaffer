@@ -163,6 +163,20 @@
   .club-pick{background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:6px; padding:5px 0;}
   .club-pick .cname{font-size:10.5px; color:var(--text-dim); text-align:center; line-height:1.2;}
   .club-pick:active .shield{transform:scale(0.93);}
+  .create-club-note{background:var(--surface); border:1px solid var(--hairline); border-radius:var(--r-md); padding:12px 14px; margin-bottom:12px; font-size:12.5px; color:var(--text-dim); line-height:1.45;}
+  .create-club-note b{color:var(--text);}
+  .create-club-field{margin-bottom:12px; text-align:left;}
+  .create-club-field label{display:block; font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.08em; margin-bottom:5px;}
+  .create-club-field input{width:100%; box-sizing:border-box; padding:12px 13px; border-radius:var(--r-md); border:1px solid var(--hairline); background:var(--surface-2); color:var(--text); font:inherit; font-size:14px;}
+  .create-club-field input:focus{outline:none; border-color:var(--accent);}
+  .create-club-colours{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:2px;}
+  .create-club-colour{background:var(--surface-2); border:1px solid var(--hairline); border-radius:var(--r-md); padding:10px;}
+  .create-club-colour label{display:block; font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.08em; margin-bottom:7px;}
+  .create-club-colour input[type=color]{width:100%; height:42px; padding:3px; border:1px solid var(--hairline); border-radius:var(--r-sm); background:var(--surface); cursor:pointer;}
+  .create-club-palette{display:flex; gap:7px; flex-wrap:wrap; margin-top:8px;}
+  .create-club-swatch{width:28px; height:28px; border-radius:50%; border:2px solid var(--hairline); box-sizing:border-box; cursor:pointer;}
+  .create-club-swatch:active{transform:scale(.92);}
+  @media (max-width:420px){.create-club-colours{gap:8px;}.create-club-colour{padding:8px;}}
 
   .search-input{width:100%; padding:12px 14px; border-radius:var(--r-md); border:1px solid var(--hairline);
     background:var(--surface); color:var(--text); font-size:14px; font-family:inherit; margin-bottom:14px;}
@@ -1410,6 +1424,27 @@
       <div id="soScore" class="num" style="font-size:34px; margin:14px 0 4px;">0 – 0</div>
       <div class="sub" id="soResult" style="min-height:18px;"></div>
       <button class="btn-primary" id="soCloseBtn" style="margin-top:14px;" disabled>Playing…</button>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="careerModeBackdrop">
+    <div class="modal">
+      <h2 style="margin-bottom:2px;">Choose your career</h2>
+      <div class="sub" id="careerModeSub" style="margin-bottom:12px;"></div>
+      <div id="careerModeBody"></div>
+      <button class="btn-primary" id="careerModeClose" style="margin-top:14px;">Back</button>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="createClubBackdrop">
+    <div class="modal">
+      <h2 style="margin-bottom:2px;">Create your club</h2>
+      <div class="sub" id="createClubSub" style="margin-bottom:12px;"></div>
+      <div id="createClubBody"></div>
+      <div class="btn-row" style="margin-top:14px;">
+        <button class="btn-secondary" id="createClubBack" style="flex:1;">Back</button>
+        <button class="btn-primary" id="createClubConfirm" style="flex:1;">Create club</button>
+      </div>
     </div>
   </div>
 
@@ -3907,6 +3942,16 @@ function packClubMeta(meta){
   Object.keys(meta).forEach(id=>{
     const c = meta[id], o = {};
     CLUB_SAVE_KEYS.forEach(k=>{ if(c[k] !== undefined && c[k] !== null) o[k] = c[k]; });
+    // Created clubs have player-chosen identity/colours. These must survive
+    // save/load instead of being rebuilt from the real-club colour database.
+    if(c.customClub){
+      o.customClub = true;
+      o.name = c.name;
+      o.replacedClubName = c.replacedClubName;
+      o.primary = c.primary;
+      o.secondary = c.secondary;
+      o.crestVariant = c.crestVariant;
+    }
     out[id] = o;
   });
   return out;
@@ -4294,11 +4339,13 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "3.8.4";
+const GAME_VERSION = "3.8.6";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
 const VERSION_NOTES = {
+  "3.8.6": "Create Your Own Club colour scheme: choose primary and secondary club colours, used across the custom crest, kits and club presentation; colours persist in saves.",
+  "3.8.5": "Create Your Own Club mode: choose a National League North or South club to replace, give the new club its own name, and start with a fresh squad in that league.",
   "3.8.3": "Results are now immutable once a match finishes, and every match involving you is saved into a season-by-season Results tab with score, competition, possession, shots, cards, scorers and player of the match. Older careers are backfilled safely.",
   "3.8.2": "Scouting now belongs to clubs as well as the manager: every club starts with its own recruitment reports, those reports are available when you arrive, your personal reports travel with you between jobs, and AI clubs recruit from their own shortlists.",
   "3.8.1": "Changing clubs now resets the old club's transfer filters and scouting assignments, so a new job starts with a fresh recruitment department.",
@@ -4758,8 +4805,25 @@ function _saveStateNow(){
   }
 }
 
-function newCareer(clubId){
+function newCareer(clubId, customIdentity){
   buildClubMeta();
+  // A created club keeps the replacement club's internal id, league place,
+  // ground, finances and promotion/relegation slot. Only its identity changes,
+  // so every existing fixture and league rule continues to point at the same
+  // club without creating a second team in the pyramid.
+  if(customIdentity && customIdentity.name){
+    const base = CLUB_META[clubId];
+    if(base){
+      base.name = customIdentity.name;
+      base.customClub = true;
+      base.replacedClubName = customIdentity.replacedClubName || base.name;
+      base.primary = customIdentity.primary || base.primary;
+      base.secondary = customIdentity.secondary || base.secondary;
+      // The crest layout stays deterministic from the new club name, while the
+      // player-chosen colours become the permanent visual identity.
+      base.crestVariant = hashStr(customIdentity.name) % 6;
+    }
+  }
   const squads = {};
   Object.values(CLUB_META).forEach(c=>{ squads[c.id] = generateSquad(c); });
   const tiers = {};
@@ -14576,6 +14640,7 @@ document.getElementById("seasonClose").onclick = ()=>{
   if(state.awaitingPreSeason) openTourChoice();
 };
 
+let createClubSelectMode = false;
 function renderClubGrid(){
   const grid = document.getElementById("clubGrid");
   grid.innerHTML = "";
@@ -14587,7 +14652,8 @@ function renderClubGrid(){
     btn.innerHTML = crestSVG(c,46) + `<div class="cname">${c.name}</div>`;
     btn.onclick = ()=>{
       playClickSound();
-      chooseDifficulty(c);
+      if(createClubSelectMode){ openCreateClubDetails(c); }
+      else chooseDifficulty(c);
     };
     grid.appendChild(btn);
   });
@@ -14599,7 +14665,7 @@ function hideAllTopScreens(){
 }
 
 /* Asked once, before a ball is kicked, and never again. */
-function chooseDifficulty(club){
+function chooseDifficulty(club, customIdentity){
   resetScoutFooter();
   const sheet0 = document.getElementById("scoutModal");
   if(sheet0) sheet0.classList.remove("fit", "builder");
@@ -14607,7 +14673,7 @@ function chooseDifficulty(club){
   if(host0) host0.classList.remove("fit-grow", "builder-body");
   const host = document.getElementById("scoutBody");
   const sub = document.getElementById("scoutSub");
-  if(!host){ startCareerWith(club, "standard"); return; }
+  if(!host){ startCareerWith(club, "standard", customIdentity); return; }
   document.querySelector("#scoutBackdrop h2").textContent = "Choose your game";
   sub.textContent = club.name + " · this cannot be changed later";
   host.innerHTML = `
@@ -14633,23 +14699,162 @@ function chooseDifficulty(club){
     b.onclick = ()=>{
       playClickSound();
       document.getElementById("scoutBackdrop").classList.remove("open");
-      startCareerWith(club, b.dataset.diff);
+      startCareerWith(club, b.dataset.diff, customIdentity);
     };
   });
   document.getElementById("scoutBackdrop").classList.add("open");
 }
 
-function startCareerWith(club, difficulty){
-  newCareer(club.id);
+function startCareerWith(club, difficulty, customIdentity){
+  newCareer(club.id, customIdentity);
   state.difficulty = difficulty;
   saveState(true);
   enterMainApp();
   openTourChoice();         // pick a destination, then play pre-season through
 }
 
-function showClubSelectFlow(){
+function showCareerModePicker(){
+  const body = document.getElementById("careerModeBody");
+  const sub = document.getElementById("careerModeSub");
+  if(!body) return;
+  sub.textContent = "Choose how this save begins.";
+  body.innerHTML = `
+    <button class="act-row" id="careerExistingBtn">
+      <span class="act-icon">⚽</span>
+      <span class="act-text">
+        <span class="act-title">Take over an existing club</span>
+        <span class="act-sub">Choose any club in the English pyramid and inherit its squad, finances and history.</span>
+      </span><span class="act-chev">›</span>
+    </button>
+    <button class="act-row" id="careerCreateBtn">
+      <span class="act-icon">★</span>
+      <span class="act-text">
+        <span class="act-title">Create your own club</span>
+        <span class="act-sub">Choose a National League North or South club to replace, name your new club, and build from there.</span>
+      </span><span class="act-chev">›</span>
+    </button>`;
+  document.getElementById("careerExistingBtn").onclick = ()=>{
+    playClickSound();
+    document.getElementById("careerModeBackdrop").classList.remove("open");
+    activeSelectTier = "premierleague";
+    showClubSelectFlow();
+  };
+  document.getElementById("careerCreateBtn").onclick = ()=>{
+    playClickSound();
+    document.getElementById("careerModeBackdrop").classList.remove("open");
+    showCreateClubSelect();
+  };
+  document.getElementById("careerModeClose").onclick = ()=>{
+    playClickSound();
+    document.getElementById("careerModeBackdrop").classList.remove("open");
+    renderStartScreen();
+  };
+  document.getElementById("careerModeBackdrop").classList.add("open");
+}
+
+function showCreateClubSelect(){
+  createClubSelectMode = true;
   hideAllTopScreens();
   document.getElementById("clubSelect").style.display="flex";
+  const title = document.querySelector("#clubSelect h1");
+  const desc = document.querySelector("#clubSelect p");
+  const tabs = document.getElementById("selectTierTabs");
+  if(title) title.textContent = "Choose a club to replace";
+  if(desc) desc.textContent = "Your new club must replace a National League North or National League South side. The league place, ground and finances stay with the slot; the squad is rebuilt for your new club.";
+  const allowed = ["nlnorth","nlsouth"];
+  activeSelectTier = allowed.indexOf(activeSelectTier) >= 0 ? activeSelectTier : "nlnorth";
+  const onSelectTierChosen = tierId=>{
+    activeSelectTier = tierId;
+    renderPillTabs(tabs, allowed.map(id=>({value:id, label:leagueShort(id)})), activeSelectTier, onSelectTierChosen);
+    renderClubGrid();
+  };
+  renderPillTabs(tabs, allowed.map(id=>({value:id, label:leagueShort(id)})), activeSelectTier, onSelectTierChosen);
+  renderClubGrid();
+}
+
+function openCreateClubDetails(replacementClub){
+  const body = document.getElementById("createClubBody");
+  const sub = document.getElementById("createClubSub");
+  const backdrop = document.getElementById("createClubBackdrop");
+  const input = document.createElement("input");
+  input.id = "createClubNameInput";
+  input.type = "text";
+  input.maxLength = 40;
+  input.autocomplete = "off";
+  input.placeholder = "e.g. Thames FC";
+  body.innerHTML = `
+    <div class="create-club-note"><b>Replacing ${replacementClub.name}</b><br>${leagueDisplayName(replacementClub.tier)} · you take over its league place, ground and starting budget. The old squad is replaced with a new generated squad for your club.</div>
+    <div class="create-club-field"><label for="createClubNameInput">Club name</label></div>
+    <div class="create-club-field">
+      <label>Club colours</label>
+      <div class="create-club-colours">
+        <div class="create-club-colour"><label for="createClubPrimary">Primary</label><input id="createClubPrimary" type="color" value="#1D4ED8" aria-label="Primary club colour"></div>
+        <div class="create-club-colour"><label for="createClubSecondary">Secondary</label><input id="createClubSecondary" type="color" value="#FFFFFF" aria-label="Secondary club colour"></div>
+      </div>
+      <div class="create-club-palette" aria-label="Colour presets">
+        <button type="button" class="create-club-swatch" data-p="%231D4ED8" data-s="#FFFFFF" style="background:linear-gradient(135deg,#1D4ED8 50%,#FFFFFF 50%)" aria-label="Blue and white"></button>
+        <button type="button" class="create-club-swatch" data-p="%23DC2626" data-s="#FFFFFF" style="background:linear-gradient(135deg,#DC2626 50%,#FFFFFF 50%)" aria-label="Red and white"></button>
+        <button type="button" class="create-club-swatch" data-p="%23000000" data-s="#FACC15" style="background:linear-gradient(135deg,#000000 50%,#FACC15 50%)" aria-label="Black and yellow"></button>
+        <button type="button" class="create-club-swatch" data-p="%23065F46" data-s="#FFFFFF" style="background:linear-gradient(135deg,#065F46 50%,#FFFFFF 50%)" aria-label="Green and white"></button>
+        <button type="button" class="create-club-swatch" data-p="%237C3AED" data-s="#FBBF24" style="background:linear-gradient(135deg,#7C3AED 50%,#FBBF24 50%)" aria-label="Purple and gold"></button>
+        <button type="button" class="create-club-swatch" data-p="%23F97316" data-s="#111827" style="background:linear-gradient(135deg,#F97316 50%,#111827 50%)" aria-label="Orange and black"></button>
+      </div>
+    </div>`;
+  body.querySelector(".create-club-field").appendChild(input);
+  sub.textContent = "Give your new club a name and choose its colours. These become the club's permanent identity for this career.";
+  const primary = document.getElementById("createClubPrimary");
+  const secondary = document.getElementById("createClubSecondary");
+  body.querySelectorAll(".create-club-swatch").forEach(btn=>{
+    btn.onclick = ()=>{
+      primary.value = btn.dataset.p.replace(/%23/g,"#");
+      secondary.value = btn.dataset.s;
+      playClickSound();
+    };
+  });
+  const confirm = document.getElementById("createClubConfirm");
+  const back = document.getElementById("createClubBack");
+  confirm.disabled = true;
+  const check = ()=>{
+    const name = input.value.trim();
+    const duplicate = Object.values(CLUB_META).some(c=>c && c.name && c.name.toLowerCase() === name.toLowerCase());
+    confirm.disabled = name.length < 2 || duplicate;
+    confirm.title = duplicate ? "That club name is already in use" : "";
+  };
+  input.addEventListener("input", check);
+  input.addEventListener("keydown", e=>{ if(e.key === "Enter" && !confirm.disabled) confirm.click(); });
+  check();
+  back.onclick = ()=>{
+    playClickSound();
+    backdrop.classList.remove("open");
+    showCreateClubSelect();
+  };
+  confirm.onclick = async ()=>{
+    const name = input.value.trim();
+    const duplicate = Object.values(CLUB_META).some(c=>c && c.name && c.name.toLowerCase() === name.toLowerCase());
+    if(name.length < 2 || duplicate){ toast(duplicate ? "That club name is already in use" : "Enter a club name", 2600); return; }
+    playClickSound();
+    backdrop.classList.remove("open");
+    const custom = {
+      name,
+      replacedClubName:replacementClub.name,
+      primary:primary.value.toUpperCase(),
+      secondary:secondary.value.toUpperCase()
+    };
+    // The difficulty screen is deliberately after identity creation, so the
+    // player knows which club they are creating before choosing Manager/Casual.
+    chooseDifficulty(Object.assign({}, replacementClub, {name}), custom);
+  };
+  backdrop.classList.add("open");
+  setTimeout(()=>input.focus(), 50);
+}
+function showClubSelectFlow(){
+  createClubSelectMode = false;
+  hideAllTopScreens();
+  document.getElementById("clubSelect").style.display="flex";
+  const title = document.querySelector("#clubSelect h1");
+  const desc = document.querySelector("#clubSelect p");
+  if(title) title.textContent = "Pick your club";
+  if(desc) desc.textContent = "Manage any of the 116 clubs across all 5 tiers of the English pyramid — real leagues, real headline players in the top two divisions, procedurally generated squads below that.";
   function onSelectTierChosen(tierId){
     activeSelectTier = tierId;
     renderPillTabs(document.getElementById("selectTierTabs"), getAllLeagueIds().map(id=>({value:id, label:leagueShort(id)})), activeSelectTier, onSelectTierChosen);
@@ -14754,7 +14959,7 @@ function renderSlotPicker(){
           return;
         }
       }
-      showClubSelectFlow();          // empty slot: start a new career here
+      showCareerModePicker();        // empty slot: choose an existing or created club
     };
   });
   menu.querySelectorAll(".slot-del").forEach(b=>{
