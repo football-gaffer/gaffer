@@ -2945,12 +2945,26 @@ function ratingOf(p){
   }
   return p._rVal;
 }
+/* A player still in his twenties has somewhere to go. Nearly four hundred
+   under-26s were generated with a ceiling identical to their current rating —
+   a twenty-three-year-old rated 80 who could never reach 81. The headroom
+   tapers with age and is nothing at all past 26, where a plateau is realistic. */
+function youthHeadroom(age){
+  if(age === undefined || age > 26) return 0;
+  if(age <= 19) return 6;
+  if(age <= 21) return 5;
+  if(age <= 23) return 4;
+  if(age <= 25) return 3;
+  return 2;
+}
+
 function potentialOf(p){
   const pot = to100(p.potF !== undefined ? p.potF : (p.potential||p.overall));
   // A ceiling, by definition. ratingOf recomputes from live attributes while
   // this reads a stored value, so any change that skipped recomputeOverall
   // could leave a player shown as better than his own potential.
-  return Math.max(pot, ratingOf(p));
+  const floor = ratingOf(p) + youthHeadroom(p.age);
+  return Math.min(99, Math.max(pot, floor));
 }
 
 function fillerOverall(tierId, isShadow){
@@ -4414,11 +4428,12 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "3.9.18";
+const GAME_VERSION = "3.9.19";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
 const VERSION_NOTES = {
+  "3.9.19": "Players in their twenties always have somewhere to go — a twenty-three-year-old can no longer be generated at his ceiling already.",
   "3.9.18": "The formation builder now measures its own layout instead of reserving a fixed amount of space, so the pitch fills what is there and the role picker is always visible.",
   "3.9.17": "Fixed the strikers disappearing off the top of the formation builder pitch on a short screen.",
   "3.9.16": "The formation builder uses the whole sheet — a full-size pitch with the save button at the foot, and shirts that stay in proportion on a smaller phone.",
