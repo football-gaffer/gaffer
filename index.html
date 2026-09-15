@@ -1034,18 +1034,14 @@
   .modal.builder{height:94vh; max-height:94vh;}
   .modal.builder .builder-body{display:flex; flex-direction:column; gap:10px;
     justify-content:flex-start; max-height:none; overflow:hidden;}
-  .modal.builder .builder-body > .build-pitch{
-    /* Sized from the space that is actually left rather than left to flex,
-       which kept resolving far too small and put the shirts back on top of one
-       another. The sheet is 94vh; the title, the role label, three rows of
-       roles, the gaps, the save button and the padding come to about 370px,
-       and the pitch takes the rest at a 3:4 shape. */
-    flex:0 0 auto;
-    height:calc(94vh - 312px);
-    width:calc((94vh - 312px) * 0.75);
-    min-height:210px; min-width:158px;
-    max-width:100%; max-height:none;
-    margin:0 auto; padding-bottom:0; aspect-ratio:auto;}
+  .modal.builder .builder-body > .build-pitch-wrap{
+    /* stretch, not center: the pitch must inherit this box's height for
+       height:100% to mean anything, and its width then follows the 3:4 shape. */
+    flex:1 1 auto; min-height:150px; display:flex;
+    align-items:stretch; justify-content:center; overflow:hidden;}
+  .modal.builder .build-pitch{
+    height:100%; width:auto; aspect-ratio:3 / 4; max-width:100%;
+    min-height:0; padding-bottom:0; margin:0;}
   .modal.builder .builder-body > .role-picker{flex:0 0 auto;}
   .modal.builder .builder-body > .btn-secondary{flex:0 0 auto; margin-top:0;}
   /* Let the roles wrap to the width instead of forcing eight across, which
@@ -1057,40 +1053,40 @@
      bottom, and the space between them belongs to the pitch. */
   .modal.builder .builder-body{justify-content:flex-start;}
   .modal.builder #scoutClose{margin-top:auto;}
-  /* A shirt has to stay in proportion to the pitch it sits on, and the pitch
-     shrinks with the viewport — so the steps are set where the pitch actually
-     gets small, not at round numbers. */
+  /* Shirt size steps with the pitch. The sizes are set from the measured
+     closest pair at each viewport, so a shirt is always smaller than the gap
+     between the two nearest players in any shape. */
+  @media (max-height: 900px){
+    .modal.builder .build-pitch .pitch-slot{width:40px; height:40px;}
+    .modal.builder .build-pitch .pitch-slot .ps-name{font-size:10px; max-width:38px;}
+  }
   @media (max-height: 830px){
-    .modal.builder .build-pitch .pitch-slot{width:38px; height:38px;}
-    .modal.builder .build-pitch .pitch-slot .ps-name{font-size:9.5px; max-width:36px;}
+    .modal.builder .build-pitch .pitch-slot{width:34px; height:34px;}
+    .modal.builder .build-pitch .pitch-slot .ps-name{font-size:9px; max-width:32px;}
   }
   @media (max-height: 700px){
-    .modal.builder .build-pitch .pitch-slot{width:27px; height:27px;}
-    .modal.builder .build-pitch .pitch-slot .ps-name{font-size:8.5px; max-width:26px;}
+    .modal.builder .build-pitch .pitch-slot{width:24px; height:24px;}
+    .modal.builder .build-pitch .pitch-slot .ps-name{font-size:8px; max-width:23px;}
   }
   @media (max-height: 620px){
-    /* An in-app browser leaves very little. Claw back a little more sheet and
-       keep the shirts small enough to stay apart on it. */
+    /* An in-app browser leaves very little to work with. */
     .modal.builder{height:97vh; max-height:97vh;}
-    .modal.builder .build-pitch .pitch-slot{width:22px; height:22px;}
-    .modal.builder .build-pitch .pitch-slot .ps-name{font-size:7.5px; max-width:21px;}
+    .modal.builder .build-pitch .pitch-slot{width:18px; height:18px;}
+    .modal.builder .build-pitch .pitch-slot .ps-name{font-size:6.5px; max-width:17px;}
   }
 
   /* A short phone cannot give the pitch a full 132% of the sheet's width and
      still show the picker and save. Narrowing it keeps the proportions and
      keeps everything on screen. */
   @media (max-height: 720px){
-    .modal.builder .builder-body > .build-pitch{max-width:244px;}
   }
   @media (max-height: 640px){
-    .modal.builder .builder-body > .build-pitch{max-width:216px;}
     .modal.builder .role-opt{padding:6px 2px; font-size:10px;}
   }
 
   /* With a mouse the sheet is centred and capped, so it needs a real height. */
   @media (pointer: fine) and (min-width: 1024px){
     .modal.builder{height:auto; max-height:88vh; max-width:560px;}
-    .modal.builder .builder-body > .build-pitch{max-width:340px;}
   }
   .build-pitch .pitch-slot{width:46px; height:46px; font-size:11px;}
   .build-pitch .pitch-slot .ps-name{font-size:11px; max-width:44px; font-weight:700;}
@@ -4418,11 +4414,12 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "3.9.17";
+const GAME_VERSION = "3.9.18";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
 const VERSION_NOTES = {
+  "3.9.18": "The formation builder now measures its own layout instead of reserving a fixed amount of space, so the pitch fills what is there and the role picker is always visible.",
   "3.9.17": "Fixed the strikers disappearing off the top of the formation builder pitch on a short screen.",
   "3.9.16": "The formation builder uses the whole sheet — a full-size pitch with the save button at the foot, and shirts that stay in proportion on a smaller phone.",
   "3.9.15": "The formation builder fits the screen again — every role is reachable without scrolling, and the pitch gives up space rather than pushing the roles off the bottom.",
@@ -15848,13 +15845,20 @@ function openFormationBuilder(){
   sub.textContent = built.ok ? built.name + " · " + builderRoles.filter(r=>r!=="GK").length + " outfield" : built.reason;
   host.innerHTML = "";
 
+  /* The pitch sits inside a wrapper that flex grows to fill whatever is left
+     after the roles and the button have taken what they need. The pitch then
+     fills that wrapper by height. No estimate of the furniture is involved,
+     which is what kept getting it wrong in one direction or the other. */
+  const pitchWrap = document.createElement("div");
+  pitchWrap.className = "build-pitch-wrap";
   const preview = document.createElement("div");
   preview.className = "pitch build-pitch";
   preview.style.margin = "0 auto 8px";
   const layout = layoutFromRoles(builderRoles);
   preview.innerHTML = `<div class="pitch-lines"></div>` + layout.map((pos,i)=>
     `<button class="pitch-slot" data-b="${i}" style="left:${pos[0]}%; top:${pos[1]}%;"><span class="ps-name">${builderRoles[i]}</span></button>`).join("");
-  host.appendChild(preview);
+  pitchWrap.appendChild(preview);
+  host.appendChild(pitchWrap);
 
   const picker = document.createElement("div");
   picker.className = "role-picker";
