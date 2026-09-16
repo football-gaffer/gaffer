@@ -4428,11 +4428,12 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "3.9.19";
+const GAME_VERSION = "3.10.0";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
 const VERSION_NOTES = {
+  "3.10.0": "Clubs built from real players are no longer far weaker than clubs built from generated ones — Cardiff fielded the worst side in the Championship by three and a half points, which is why every season ended in relegation. Recruitment databases are also much deeper at the start.",
   "3.9.19": "Players in their twenties always have somewhere to go — a twenty-three-year-old can no longer be generated at his ceiling already.",
   "3.9.18": "The formation builder now measures its own layout instead of reserving a fixed amount of space, so the pitch fills what is there and the role picker is always visible.",
   "3.9.17": "Fixed the strikers disappearing off the top of the formation builder pitch on a short screen.",
@@ -4964,6 +4965,7 @@ function newCareer(clubId, customIdentity){
   setSeasonBudgets();
   initCoefficients();
   ensureKeepers();          // whatever built these squads, they all need a keeper
+  balanceSquadsToDivision();
   initCupsForSeason();
   initNationalCups();
   initEuroForSeason();
@@ -6976,6 +6978,53 @@ const LINE_TEMPLATES = {
 /* A keeper guarantee that doesn't care where a squad came from. Applied to the
    whole world after setup and on every load, because squads are built by more
    than one path and a side with no goalkeeper is unplayable. */
+/* A club built mostly from real players ended up far weaker than one filled
+   with generated ones. Cardiff carries 25 real players and fielded a 71-rated
+   eleven in a division averaging 78 — the worst side in the Championship by
+   three and a half points, which is why every season ended in relegation
+   whatever the manager did. Swansea (70) and Bolton (69) had the same problem.
+
+   This lifts any club sitting well below its division, keeping the shape of
+   the squad — the best players stay the best — and never touches a club that
+   is already at or above its level. */
+function balanceSquadsToDivision(){
+  const xiMean = sq=>{
+    const a = (sq||[]).slice().sort((x,y)=> ratingOf(y) - ratingOf(x)).slice(0, 11);
+    return a.length ? a.reduce((t,p)=> t + ratingOf(p), 0) / a.length : 0;
+  };
+  const byTier = {};
+  Object.keys(state.squads || {}).forEach(id=>{
+    const c = clubById(id); if(!c || !c.tier) return;
+    (byTier[c.tier] = byTier[c.tier] || []).push({id, mean: xiMean(state.squads[id])});
+  });
+
+  Object.keys(byTier).forEach(tier=>{
+    const clubs = byTier[tier].filter(c=> c.mean > 0);
+    if(clubs.length < 6) return;
+    const sorted = clubs.map(c=> c.mean).sort((a,b)=> a - b);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    // A club may sit up to five points under the median — that is a relegation
+    // fight, which is fine. Below that it cannot compete at all.
+    const floor = median - 5;
+
+    clubs.forEach(c=>{
+      if(c.mean >= floor) return;
+      const lift = floor - c.mean;                     // in displayed points
+      const sq = state.squads[c.id] || [];
+      sq.forEach(p=>{
+        // Nudge the underlying attributes so ratingOf and potentialOf follow,
+        // rather than writing a rating that the next recompute would discard.
+        const step = lift / 2.9;                       // displayed points per attribute point
+        ["pace","passing","shooting","defending","physical"].forEach(k=>{
+          if(typeof p[k] === "number") p[k] = clamp(p[k] + step, 1, 20);
+        });
+        if(typeof p.potential === "number") p.potential = clamp(p.potential + step, 1, 20);
+        if(typeof recomputeOverall === "function"){ try{ recomputeOverall(p); }catch(e){} }
+      });
+    });
+  });
+}
+
 function ensureKeepers(){
   Object.keys(state.squads || {}).forEach(cid=>{
     const sq = state.squads[cid];
@@ -16792,7 +16841,19 @@ function ensureClubScoutingNetwork(forceSeed){
     const entry = clubScoutingEntry(club.id);
     // New careers get a proper initial database. Existing saves are topped up
     // gently so an old career does not suddenly reveal half the transfer market.
-    const target = forceSeed && Object.keys(entry.reports).length===0 ? 10 : 10;
+    /* A recruitment department that has been running for years should have a
+       real database behind it, not ten names. It scales with the club's
+       recruitment centre and its standing, so a Premier League side arrives
+       with a deep book and a National League club with a thin one — and
+       upgrading the centre visibly grows it. */
+    const rec = (club.facilities && club.facilities.recruitment) || 1;
+    /* Standing comes from the club's own expected level. Referring to a
+       constant that does not exist throws rather than returning undefined,
+       which is how the previous attempt silently seeded nothing. */
+    const standing = (typeof TIER_EXPECTED_LEVEL !== "undefined" && TIER_EXPECTED_LEVEL[club.tier])
+      ? clamp(Math.round(TIER_EXPECTED_LEVEL[club.tier] / 4), 0, 5) : 2;
+    const deep = 14 + rec * 9 + standing * 3;          // 26 at the bottom, 70+ at the top
+    const target = forceSeed && Object.keys(entry.reports).length === 0 ? deep : Math.max(10, Math.round(deep * 0.6));
     seedClubScouting(club.id, target);
   });
   if(state.clubId){
