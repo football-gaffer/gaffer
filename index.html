@@ -384,8 +384,8 @@
   .ach-item:last-child{border-bottom:none;}
   .ach-item.locked{opacity:0.42;}
   .ach-item .badge{width:34px; height:34px; border-radius:50%; background:var(--surface-2); display:flex;
-    align-items:center; justify-content:center; font-size:17px; flex-shrink:0;}
-  .ach-item.unlocked .badge{background:rgba(232,185,78,0.16); box-shadow:0 0 0 1px rgba(232,185,78,0.35);}
+    align-items:center; justify-content:center; font-size:17px; flex-shrink:0; box-shadow:inset 0 1px 0 rgba(255,255,255,0.1);}
+  .ach-item.unlocked .badge{background:linear-gradient(135deg, rgba(232,185,78,0.28), rgba(232,185,78,0.12)); box-shadow:0 0 0 1.5px rgba(232,185,78,0.6), inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 8px rgba(0,0,0,0.15);}
   .ach-item .t{font-size:14px;}
   .ach-item .d{font-size:11.5px; color:var(--text-dim); margin-top:1px;}
 
@@ -417,10 +417,10 @@
      LISTED previously used var(--accent) — the club's own colour — which made it
      invisible against clubs whose scheme happened to match. */
   .mkt-badge{font-size:9px; padding:2px 5px; border-radius:var(--r-sm); font-weight:700; letter-spacing:0.04em; margin-left:4px;
-    border:1px solid transparent;}
-  .mkt-badge.free{background:rgba(63,191,111,0.22); color:#5FD68C; border-color:rgba(63,191,111,0.45);}
-  .mkt-badge.listed{background:rgba(240,173,60,0.22); color:#F5C46B; border-color:rgba(240,173,60,0.5);}
-  .mkt-badge.loan{background:rgba(108,171,221,0.22); color:#8CC3E8; border-color:rgba(108,171,221,0.5);}
+    border:1.2px solid transparent; box-shadow:0 1px 2px rgba(0,0,0,0.08);}
+  .mkt-badge.free{background:rgba(63,191,111,0.28); color:#4FD680; border-color:rgba(63,191,111,0.65);}
+  .mkt-badge.listed{background:rgba(240,173,60,0.28); color:#F5C46B; border-color:rgba(240,173,60,0.7);}
+  .mkt-badge.loan{background:rgba(108,171,221,0.28); color:#8CC3E8; border-color:rgba(108,171,221,0.65);}
   .ovr-pair.vague .ovr{font-size:11px; color:var(--text-dim); letter-spacing:-0.02em;}
   .ovr-pair.vague .pot{font-size:9.5px; color:var(--text-dim);}
   .ovr-pair.vague{width:52px;}
@@ -560,7 +560,7 @@
   .rec-season{opacity:0.7; margin-left:5px;}
   .rec-retired{color:var(--accent); font-size:10px; letter-spacing:0.04em;}
   .wk-tag{color:#F5C46B; font-weight:700; letter-spacing:.03em;}
-  .mkt-badge.cold{background:rgba(150,158,170,0.18); color:#9AA3B0; border-color:rgba(150,158,170,0.4);}
+  .mkt-badge.cold{background:rgba(150,158,170,0.26); color:#9AA3B0; border-color:rgba(150,158,170,0.6); box-shadow:0 1px 2px rgba(0,0,0,0.08);}
   .market-count{font-size:11.5px; color:var(--text-dim); margin:2px 0 8px; text-align:right;}
   .filter-row{display:flex; gap:12px; margin-bottom:10px;}
   .filter-row label{flex:1; font-size:11.5px; color:var(--text-dim); display:flex; flex-direction:column; gap:3px;}
@@ -1002,10 +1002,10 @@
   .offer-kind button.active{background:var(--accent); color:var(--accent-ink); border-color:transparent; font-weight:600;}
   .interest-line{font-size:11.5px; margin-top:6px;}
 
-  .err-badge.info{background:rgba(232,185,78,0.18); color:var(--accent);}
-  .err-badge{width:38px; height:38px; border-radius:50%; background:rgba(226,84,74,0.16);
+  .err-badge.info{background:linear-gradient(135deg, rgba(232,185,78,0.24), rgba(232,185,78,0.12)); color:var(--accent); box-shadow:0 0 0 1.2px rgba(232,185,78,0.5), 0 2px 4px rgba(0,0,0,0.1);}
+  .err-badge{width:38px; height:38px; border-radius:50%; background:linear-gradient(135deg, rgba(226,84,74,0.28), rgba(226,84,74,0.14));
     color:var(--bad); display:flex; align-items:center; justify-content:center;
-    font-size:22px; font-weight:700; margin-bottom:10px;}
+    font-size:22px; font-weight:700; margin-bottom:10px; box-shadow:0 0 0 1.5px rgba(226,84,74,0.55), 0 4px 8px rgba(0,0,0,0.12);}
   .err-code{font-family:'Barlow Condensed','Helvetica Neue',Arial Narrow,system-ui,sans-serif; font-size:12px; letter-spacing:0.08em;
     color:var(--text-dim); background:var(--surface-2); display:inline-block;
     padding:4px 9px; border-radius:var(--r-sm); margin-bottom:4px;}
@@ -1143,8 +1143,8 @@
   .leader-row{display:flex; align-items:center; gap:9px; font-size:12px; color:var(--text-dim); margin-bottom:10px;}
   .leader-track{flex:1; height:6px; background:var(--surface-2); border-radius:var(--r-sm); overflow:hidden;}
   .leader-fill{display:block; height:100%; background:var(--accent); border-radius:var(--r-sm);}
-  .mkt-badge.cap{background:var(--accent); color:var(--accent-ink); font-weight:800;}
-  .mkt-badge.vice{background:rgba(232,185,78,0.22); color:var(--accent);}
+  .mkt-badge.cap{background:var(--accent); color:var(--accent-ink); font-weight:800; box-shadow:0 2px 4px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.2);}
+  .mkt-badge.vice{background:linear-gradient(135deg, rgba(232,185,78,0.32), rgba(232,185,78,0.14)); color:#F5C46B; border:1.2px solid rgba(232,185,78,0.6); box-shadow:0 1px 2px rgba(0,0,0,0.08);}
 
   .tour-opt{display:flex; align-items:center; gap:11px; text-align:left; line-height:1.35;}
   .tour-icon{font-size:22px;}
@@ -4428,11 +4428,12 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "3.10.4";
+const GAME_VERSION = "3.10.5";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
 const VERSION_NOTES = {
+  "3.10.5": "Three fixes: an agreed transfer that cannot go through (the buyer runs out of money, or their squad fills up) no longer disappears leaving the player stuck as sold; Comeback King now needs the opposition to have scored first, not merely to have scored; and Loyalty Card counts seasons at your current club rather than seasons in your career.",
   "3.10.4": "La Liga badges are in, and Ligue 1 is now complete. 304 of the game's 480 clubs have a badge.",
   "3.10.3": "Club badges for the foreign leagues too: Serie A, the Bundesliga, Ligue 1, the Eredivisie, the Primeira Liga, the Belgian Pro League, the Scottish Premiership, the Austrian Bundesliga and the Süper Lig.",
   "3.10.2": "Sharper club badges: stored at a higher resolution with a light clean-up, so they no longer look soft on high-resolution phone screens. Fixed: after being sacked near the end of a season, Continue no longer keeps opening the contract screen for your old club, and that club now decides its own out-of-contract players. Managing abroad: if your club is relegated out of a foreign top flight, you now leave the club and can take a new job, instead of being left with a club that has no league.",
@@ -5536,6 +5537,20 @@ function unlockedSet(){ return new Set(state.achievements||[]); }
 
 // Called with a partial context after any event that could unlock something.
 // Merges into persistent counters so streak/careers-based ones work across weeks.
+/* Seasons in the current job, counted from the spell the manager is actually
+   in, so moving clubs starts the count again instead of inheriting the career
+   season number. */
+function seasonsAtCurrentClub(){
+  if(!state || !state.clubId) return 0;
+  if(state.manager && state.manager.unemployed) return 0;
+  const hist = (state.manager && state.manager.history) || [];
+  let from = null;
+  for(let i=hist.length-1;i>=0;i--){
+    if(hist[i].clubId === state.clubId && hist[i].toSeason === null){ from = hist[i].fromSeason; break; }
+  }
+  if(from === null) from = state.season;      // a save from before spells were tracked
+  return Math.max(1, state.season - from + 1);
+}
 function checkAchievements(ctx){
   if(!state.achievements) state.achievements = [];
   const have = unlockedSet();
@@ -5545,7 +5560,7 @@ function checkAchievements(ctx){
     unbeatenStreak:state.streaks?state.streaks.unbeaten:0,
     cleanSheetStreak:state.streaks?state.streaks.cleanSheet:0,
     winStreak:state.streaks?state.streaks.win:0,
-    seasonsAtClub:state.season, leagueTitles:state.honours?state.honours.leagueTitles:0,
+    seasonsAtClub:seasonsAtCurrentClub(), leagueTitles:state.honours?state.honours.leagueTitles:0,
     promotions:state.honours?state.honours.promotions:0,
     maxedFacility:Object.values(clubById(state.clubId).facilities).some(v=>v>=5),
   }, ctx||{});
@@ -8012,8 +8027,25 @@ function settleAgreedDeals(){
   deals.forEach(d=>{
     const p = (state.squads[state.clubId]||[]).find(x=>x.id===d.playerId);
     const buyer = clubById(d.toClub);
-    if(!p || !buyer){ done.push(d); return; }
-    completeSale(p, buyer, d.fee, null);
+    if(!p || !buyer){
+      // The buying club has gone: he is yours again rather than left in limbo.
+      if(p) p.agreedToLeave = false;
+      done.push(d); return;
+    }
+    const res = completeSale(p, buyer, d.fee, null);
+    if(res && res.ok === false){
+      // The sale failed — they can no longer pay, or their squad is full. The
+      // agreement stands and is tried again next week rather than disappearing
+      // with the player still here and still flagged as leaving.
+      d.attempts = (d.attempts || 0) + 1;
+      if(d.attempts >= 3){
+        p.agreedToLeave = false;
+        pushNews("Transfer collapses",
+          `${buyer.name}'s move for ${fullName(p)} has fallen through. ${res.reason} He stays with us.`, "transfer");
+        done.push(d);
+      }
+      return;
+    }
     done.push(d);
   });
   state.agreedDeals = deals.filter(d=> done.indexOf(d) === -1);
@@ -8732,6 +8764,11 @@ function buildFeedEvents(fixture, detail, homeClub, awayClub, ctx){
 
   for(let i=0;i<fixture.hg;i++) events.push({minute:rndInt(1,91), side:"home", type:"goal", player:hs[i]||null});
   for(let i=0;i<fixture.ag;i++) events.push({minute:rndInt(1,91), side:"away", type:"goal", player:as[i]||null});
+  // Remember who scored first, so "win after conceding first" means exactly that.
+  if(detail){
+    const goals = events.filter(e=>e.type==="goal").sort((a,b)=>a.minute-b.minute);
+    detail.firstGoalSide = goals.length ? goals[0].side : null;
+  }
 
   // Bookings — more in a derby, more in bad weather.
   const cardCount = rndInt(1,5) + (ctx && ctx.derby ? rndInt(1,4) : 0);
@@ -10599,6 +10636,15 @@ function recordQuickStats(clubId, goalsFor, goalsAgainst){
   });
 }
 
+/* A comeback is a win in which THEY scored first — not merely a win in which
+   they scored at all. The match feed records which side scored the opening
+   goal; without that record we do not award it. */
+function concededFirstInMatch(won, oppGoals, detail, isHome){
+  if(!won || !oppGoals) return false;
+  const first = detail && detail.firstGoalSide;
+  if(!first) return false;
+  return first !== (isHome ? "home" : "away");
+}
 function commitMatchStats(homeId, awayId, hg, ag, detail){
   // Route the user's own players through the same rating record as everyone
   // else, so league tables and awards compare like with like.
@@ -14501,7 +14547,7 @@ async function advanceWeek(){
 
     checkAchievements({
       playedMatch:true, wonMatch:won, goalsFor:myGoals, goalsAgainst:oppGoals,
-      topScorerInMatch, concededFirst: !won ? false : (oppGoals>0),
+      topScorerInMatch, concededFirst: concededFirstInMatch(won, oppGoals, detail, isHome),
       playedYouth: selectStartingXI(mySquad).some(p=>p.isYouth),
       seasonGoalsFor: ss.goalsFor,
     });
@@ -16544,7 +16590,7 @@ function openDiagnostics(){
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
         a.download = name;
-        document.host.appendChild(a); a.click();
+        document.body.appendChild(a); a.click();
         setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 1500);
         toast("Career exported", 3000);
       }catch(e){ reportError("SAV-04", e, "export"); }
