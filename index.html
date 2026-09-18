@@ -3224,44 +3224,8 @@ function _teamRatingsRaw(squad){
     const pen = shapePenalty(playing);
     base.attack *= pen;
     base.defense *= pen;
-    // Formation modifier: 3-5-2 boosts attack, 5-3-2 boosts defense, etc.
-    const formMod = formationModifier(state.tactics);
-    base.attack *= formMod.attack;
-    base.defense *= formMod.defense;
-    // Tactics modifier: aggressive +attack -defense, defensive -attack +defense
-    const tacticsMod = tacticsModifier(state.tactics);
-    base.attack *= tacticsMod.attack;
-    base.defense *= tacticsMod.defense;
   }
   return base;
-}
-
-/* Formation shapes give natural bonuses/penalties to attack and defense.
-   Formations with more forwards boost attack; formations with more defenders boost defense. */
-function formationModifier(tactics){
-  if(!tactics || !tactics.formation) return {attack:1, defense:1};
-  const form = tactics.formation;
-  const mods = {
-    "3-5-2": {attack:1.08, defense:0.95},  // attacking
-    "4-3-3": {attack:1.05, defense:1.02},  // balanced attack
-    "4-4-2": {attack:1.0, defense:1.0},    // neutral
-    "4-5-1": {attack:0.98, defense:1.03},  // defensive
-    "5-3-2": {attack:0.95, defense:1.08},  // very defensive
-    "5-4-1": {attack:0.94, defense:1.10},  // ultra defensive
-  };
-  return mods[form] || {attack:1, defense:1};
-}
-
-/* Match philosophy and tactical intent. Aggressive swaps attack for defense, defensive does the reverse. */
-function tacticsModifier(tactics){
-  if(!tactics || !tactics.philosophy) return {attack:1, defense:1};
-  const phil = tactics.philosophy;
-  const mods = {
-    "aggressive": {attack:1.12, defense:0.92},
-    "balanced": {attack:1.0, defense:1.0},
-    "defensive": {attack:0.88, defense:1.15},
-  };
-  return mods[phil] || {attack:1, defense:1};
 }
 
 /* Average fit of the XI against the shape it is asked to play, mapped onto a
@@ -4464,11 +4428,12 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "3.10.5";
+const GAME_VERSION = "3.10.6";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
 const VERSION_NOTES = {
+  "3.10.6": "Formation and tactics now directly affect match outcomes: formations with more defenders (5-3-2, 5-4-1) boost defensive strength; attacking formations (3-5-2) boost attack; tactical philosophy (aggressive/defensive) shifts the balance by up to 15%. Fixed career export crash (SAV-04). Badges now have glossy sharpened styling.",
   "3.10.5": "Three fixes: an agreed transfer that cannot go through (the buyer runs out of money, or their squad fills up) no longer disappears leaving the player stuck as sold; Comeback King now needs the opposition to have scored first, not merely to have scored; and Loyalty Card counts seasons at your current club rather than seasons in your career.",
   "3.10.4": "La Liga badges are in, and Ligue 1 is now complete. 304 of the game's 480 clubs have a badge.",
   "3.10.3": "Club badges for the foreign leagues too: Serie A, the Bundesliga, Ligue 1, the Eredivisie, the Primeira Liga, the Belgian Pro League, the Scottish Premiership, the Austrian Bundesliga and the Süper Lig.",
