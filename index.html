@@ -2836,6 +2836,8 @@ function syncPidCounter(){
     // Missing them here meant the counter could restart below their ids after a
     // reload and hand the same id to a brand new player.
     scan(state && state.youthScouting && state.youthScouting.prospects);
+    scan(state && state.youthScouting && state.youthScouting.shortlist);
+    scan(state && state.academy && state.academy.players);
   }catch(e){}
   if(max + 1 > _pid) _pid = max + 1;
   return _pid;
@@ -4469,12 +4471,17 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "4.1.3";
+const GAME_VERSION = "4.4.0";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
 const VERSION_NOTES = {
+  "4.4.0": "The academy, deepened. Where you send a scout now matters: every nation carries its own standard of youth production, shown as stars, and the great ones give him both more names and better ones — though a gem can still come from anywhere. Scouts describe a boy the way a coach would, from 'unlikely to make it' up to 'potential to be special', so a shortlist reads at a glance. And your own annual intake now comes up into the academy rather than straight into the first-team squad, with an intake-day report naming the boy your coaches think most of.",
+  "4.3.0": "The Academy. Send a scout to any of thirteen countries and he comes back weeks later with a shortlist of eight to sixteen boys aged 13 to 16 — and because he has watched them properly, you see exactly what each can do now and how far he might go. Sign whoever you want onto academy forms and they join your academy team, which has its own tab under Squad and sits completely outside the 30-man senior squad. They age and improve under your coaching, driven by your Youth Academy level, and at eighteen you either give them professional terms and a place in the first-team squad or let them go. Anyone you passed on signs elsewhere in the summer.",
+  "4.2.0": "Three fixes. Continuous scouting never repeated after its first report — the re-queued assignment was being discarded the moment it was made, so scouts looked stuck. Position coaching is no longer thrown away when the balance dips; it pauses and resumes with the progress intact, which is why a position being learned could vanish between seasons. And Casual is now actually casual: nobody walks out on a renewal you offer, and the board will go well past its usual wage ceiling to keep a player rather than let him leave on a free.",
+  "4.1.4": "Changelog repair: a version entry had been overwritten and three older entries were duplicated, which meant only the last of each was ever shown. Merthyr Town's entry now correctly reads National League North.",
   "4.1.3": "Youth academy places set by level: 16, 18, 20, 24 and 26 from level 1 to 5.",
+  "4.1.2": "Youth academy places raised so an academy can hold a proper intake.",
   "4.1.1": "Fixes found in a full audit. Youth prospects could grow past their own ceiling, and a single year of development could hand a weak attribute the value of a strong one — both corrected, so a limited player stays limited. The academy now has a set number of places, from 20 at level 1 up to 36 at level 5, and your scouts will tell you when it is full. Five error codes that could appear without a label have been named.",
   "4.1.0": "Youth prospects now actually develop. A 13-year-old you scout improves year on year while he is with you, driven by your Youth Academy level — so the academy upgrade matters as much as the scouts who found him. Some kids kick on, some stall, and none ever pass their ceiling, which keeps the decision at 18 a real one. The Youth Watch now shows how many years you have watched each boy and whether he is improving, stalled or slipping, and a strong year gets reported as an academy update.",
   "4.0.2": "Players you sign now get a proper contract. A transfer used to carry the selling club's remaining years across, so paying a fee for someone in his last year put him straight back out of contract at the next rollover — which is how bought players were disappearing over the summer. Every signing now gets fresh terms on your wages. Added a Squad changes report each summer listing exactly who came and went, and the game now flags it if anyone leaves unaccounted for.",
@@ -4512,7 +4519,6 @@ const VERSION_NOTES = {
   "3.6.5": "Custom formations can now be deleted with a visible × button on touchscreens, with confirmation before removal.",
   "3.6.4": "Leave it now dismisses the unhappy-player action for the current week instead of immediately reappearing.",
   "3.6.3": "Formation builder now fits the pitch, position picker and Save & Close button on one screen — no scrolling needed.",
-  "2.0.1": "A scouting brief can now ask for prospects rather than ready-made players, and set both ends of the age range.",
   "3.6.2": "Desktop and laptop space is now used properly: the app fills the window, the team pitch gets a usable share of it, and the squad beside it stays readable.",
   "3.6.1": "Actually fixed the missing navigation on a laptop — the previous attempt targeted the wrong element.",
   "3.6.0": "Fixed being stranded on a page with no navigation on a laptop. The tabs are now always visible and content scrolls if it needs to.",
@@ -4565,9 +4571,7 @@ const VERSION_NOTES = {
   "1.9.2": "The transfer market shows real positions and can be filtered by them. Free agents are always available. Playing slightly out of position now costs a point or two rather than a chunk.",
   "1.9.1": "Fixed newly created players being given ids that already belonged to someone else, which could put one player in two squads.",
   "1.9.0": "Players now have real positions and formations have editable slots — pick whether your 4-2-3-1 holds with two DMs, two CMs or one of each. Auto-pick can favour the freshest players, and anyone unavailable cannot be selected.",
-  "1.8.1": "Merthyr Town are in the game, playing at Penydarren Park in National League South.",
   "1.8.1": "Merthyr Town are in the game, playing at Penydarren Park in National League North.",
-  "1.8.1": "Merthyr Town are in the game, in National League North at Penydarren Park.",
   "1.8.0": "The transfer market no longer shows a player as available when he would turn you down. Anyone out of reach is marked, with the reason.",
   "1.7.9": "Report a problem is now its own page instead of eight buttons crowding Settings.",
   "1.7.8": "Fixed starting a new career jumping straight to the Settings screen.",
@@ -5395,7 +5399,25 @@ function runSeasonRollover(){
   // Youth Watch prospects age alongside everyone else. Anyone who reaches 18
   // without a decision leaves on his own — the same choice a real academy
   // is forced into by the calendar.
-  ageYouthProspects();
+  ageAcademy();
+  // The academy intake message — the one day in the year every manager waits
+  // for. Reported after ageing so the numbers shown are the new season's.
+  try{
+    const intake = (youthResult.graduates || []);
+    if(intake.length){
+      const best = intake.slice().sort((a,b)=> potentialOf(b) - potentialOf(a))[0];
+      pushNews("Youth intake",
+        `${intake.length} boy${intake.length===1?"":"s"} have come up from the junior sides into the academy. ` +
+        (best ? `Your coaches think most of ${fullName(best)} (${posOf(best)}) — ${ceilingBand(best).text.toLowerCase()}.` : ""),
+        "squad");
+    }
+    const over = state._intakeOverflow || [];
+    if(over.length){
+      pushNews("Academy full",
+        `${over.length} of this year's intake had to be let go — there was no room for them. Expand the Youth Academy to keep more of what you produce.`, "board");
+    }
+    state._intakeOverflow = [];
+  }catch(e){ reportError("YTH-02", e, "youth intake report"); }
   // Life events run first so anyone who walks away from the game this season is
   // folded into the retirement list rather than vanishing silently.
   const contractResult = processContracts();   // deals run down; frees hit the market
@@ -11008,7 +11030,10 @@ function runYouthRotation(){
       } else if(Math.random() < 0.018){
         const n = Math.random() < 0.12 ? 3 : 2;
         const sibs = makeSiblings(club, n, academyBonus);
-        sibs.forEach(s=>{ squad.push(s); if(isUser) userGraduates.push(s); });
+        sibs.forEach(s=>{
+          if(isUser && typeof intakeToAcademy === "function"){ intakeToAcademy(s); userGraduates.push(s); }
+          else squad.push(s);
+        });
         if(isUser) pushWire(`${sibs[0].siblingType==="triplet"?"Triplets":"Twins"} sign at ${club.name}`,
           `${sibs.map(s=>fullName(s)).join(", ")} have all been offered professional terms on the same day.`,
           "personal", club.id);
@@ -11065,8 +11090,13 @@ function runYouthRotation(){
         });
         recomputeOverall(p);
       }
-      squad.push(p);
-      if(isUser) userGraduates.push(p);
+      // Your own intake comes through the academy now, the way it does at a
+      // real club — they are academy players first, not first-team squad
+      // members handed a place on their sixteenth birthday. Rival clubs still
+      // absorb theirs straight into the squad, since they have no academy
+      // screen for you to manage.
+      if(isUser && typeof intakeToAcademy === "function"){ intakeToAcademy(p); userGraduates.push(p); }
+      else squad.push(p);
     }
 
     // Trim back to target. Ranked by ability PLUS potential, so promising kids
@@ -12098,7 +12128,7 @@ const ERROR_AREAS = {
   "DAT-02":"Career self check", "SCT-01":"Scouting", "TRN-01":"Position training", "REC-01":"Club records", "SMK-01":"Screen smoke test", "ACT-01":"Action list", "ACT-02":"Action decision",
   "BOOT-04":"Loading the active slot", "SEL-01":"Team selection",
   "SQD-01":"Squad ledger — unexplained departure", "SQD-02":"Squad ledger",
-  "YTH-01":"Youth scouting",
+  "YTH-01":"Youth scouting", "YTH-02":"Youth intake report",
   "SCT-02":"Club scouting network", "SCT-03":"Seasonal club scouting",
   "SIM-05":"Penalty shootout", "TRF-10":"Settling agreed deals",
   "TRF-14":"Transfer market maintenance",
@@ -12767,14 +12797,17 @@ function renderSquad(){
   if(!state || !state.clubId || !state.squads) return;   // no career loaded yet
   const el0 = document.getElementById("screen-squad");
   el0.innerHTML = `<div class="tier-tabs" id="squadSubTabs"></div><div id="squadSubContent"></div>`;
+  const due = (typeof academyDecisionsDue === "function") ? academyDecisionsDue().length : 0;
   renderPillTabs(document.getElementById("squadSubTabs"), [
     {value:"squad", label:"Squad"},
     {value:"lineup", label:"Team"},
     {value:"tactics", label:"Tactics"},
+    {value:"academy", label: "Academy" + (due ? " (" + due + ")" : "")},
   ], squadSubTab, v=>{ squadSubTab=v; renderSquad(); });
   const host = document.getElementById("squadSubContent");
   if(squadSubTab==="lineup") return renderPitch(host);   // visual pitch replaces the old list
   if(squadSubTab==="tactics") return renderTactics(host);
+  if(squadSubTab==="academy") return renderAcademy(host);
   return renderSquadList(host);
 }
 
@@ -13078,6 +13111,98 @@ function renderLineup(host){
     state.lineup = autoPickXI(squad, state.tactics.formation).map(p=>p.id);
     playClickSound(); toast("Best available XI selected"); saveState(); renderSquad();
   };
+}
+
+/* =========================================================================
+   THE ACADEMY SCREEN — your under-18 side, listed like a squad because that
+   is what it is. Everyone the scouts found and you took on, what he can do
+   now, how far he might go, and how close he is to the decision at eighteen.
+   ========================================================================= */
+function renderAcademy(host){
+  if(!state || !state.clubId || !state.squads) return;
+  const club = clubById(state.clubId);
+  const players = academyPlayers().slice().sort((a,b)=>{
+    if(b.age !== a.age) return b.age - a.age;          // closest to a decision first
+    return potentialOf(b) - potentialOf(a);
+  });
+  const cap = academyCap();
+  const due = academyDecisionsDue();
+  const youthLevel = (club.facilities && club.facilities.youth) || 1;
+  const avgCeil = players.length
+    ? Math.round(players.reduce((s,p)=>s+to100(potentialOf(p)),0)/players.length) : "—";
+  const best = players.length
+    ? players.slice().sort((a,b)=>potentialOf(b)-potentialOf(a))[0] : null;
+
+  host.innerHTML = `<div class="section-title" style="margin-top:0;">Academy</div>
+    <div class="stat-row" style="margin-top:0; margin-bottom:14px;">
+      <div class="stat-box"><div class="v num">${players.length}/${cap}</div><div class="l">Places</div></div>
+      <div class="stat-box"><div class="v num">${avgCeil}</div><div class="l">Avg ceiling</div></div>
+      <div class="stat-box"><div class="v num">${youthLevel}</div><div class="l">Academy level</div></div>
+      <div class="stat-box"><div class="v num" style="color:${due.length?'var(--bad)':'var(--text)'}">${due.length}</div><div class="l">Decisions due</div></div>
+      <div class="stat-box"><div class="v num" style="font-size:13px;">${best?(best.last||best.first):"—"}</div><div class="l">Best prospect</div></div>
+    </div>
+    <div id="academyBody"></div>`;
+
+  const body = document.getElementById("academyBody");
+
+  if(!players.length){
+    body.innerHTML = `<div class="empty-note" style="padding:18px 14px; text-align:center; color:var(--text-dim); font-size:13px; line-height:1.55;">
+      Nobody on the books yet.<br>Send a scout abroad from the Scouting screen — he'll come back with a shortlist of 13 to 16 year olds and a real read on each of them.
+    </div>`;
+    return;
+  }
+
+  const rows = players.map(p=>{
+    const now  = Math.round(to100(p));
+    const ceil = Math.round(to100(potentialOf(p)));
+    const band = ceilingBand(p);
+    const isDue = p.age >= ACADEMY_PRO_AGE;
+    const g = p.growthLast;
+    const trend = g === undefined ? ""
+      : g >= 2 ? `<span style="color:var(--good); font-weight:700;">▲ kicked on</span>`
+      : g === 1 ? `<span style="color:var(--good);">▲ improving</span>`
+      : `<span style="color:var(--text-dim);">— stalled</span>`;
+    const yrs = p.yearsInAcademy ? `${p.yearsInAcademy} yr${p.yearsInAcademy===1?"":"s"}` : "new";
+    return `<div class="row" style="${isDue?'border-left:3px solid var(--bad);':''}">
+        <div style="flex:1; min-width:0;">
+          <div style="font-weight:650; font-size:14px;">
+            ${flagFor(p.nat)} ${fullName(p)}
+            <span class="tag" style="margin-left:6px;">${p.age}</span>
+            <span class="tag" style="margin-left:4px;">${posOf(p)}</span>
+            ${isDue?`<span class="tag" style="margin-left:4px; background:rgba(226,84,74,0.18); color:var(--bad);">DECIDE</span>`:""}
+          </div>
+          <div style="font-size:12px; color:var(--text-dim); margin-top:3px;">
+            <span style="color:${band.cls==="good"?"var(--good)":band.cls==="dim"?"var(--text-dim)":"var(--text)"}; font-weight:${band.weight};">${band.text}</span>
+            · now <strong style="color:var(--text);">${now}</strong>, ceiling <strong style="color:var(--text);">${ceil}</strong>
+            · ${yrs} · ${trend}
+          </div>
+        </div>
+      </div>
+      <div style="display:flex; gap:8px; margin:-2px 0 12px;">
+        <button class="btn-secondary" style="flex:1; padding:8px; font-size:12.5px;" data-promote="${p.id}">${isDue?"Professional terms":"Promote to first team"}</button>
+        <button class="btn-secondary" style="flex:1; padding:8px; font-size:12.5px; opacity:.75;" data-release="${p.id}">Release</button>
+      </div>`;
+  }).join("");
+
+  body.innerHTML = (due.length
+    ? `<div class="scout-row" style="border-left:3px solid var(--bad); margin-bottom:10px;"><span class="sr-body">
+        <span class="sr-title">${due.length} player${due.length===1?"":"s"} turning ${ACADEMY_PRO_AGE}</span>
+        <span class="sr-sub">They need professional terms or releasing. Leave it and they'll find a club elsewhere at the end of the season.</span>
+       </span></div>`
+    : "") + `<div class="list">${rows}</div>`;
+
+  body.querySelectorAll("[data-promote]").forEach(b=> b.onclick = ()=>{
+    const r = promoteFromAcademy(b.dataset.promote);
+    toast(r.ok ? `${fullName(r.player)} signs professional terms` : r.reason, 3400);
+    playClickSound();
+    renderSquad();
+  });
+  body.querySelectorAll("[data-release]").forEach(b=> b.onclick = ()=>{
+    const r = releaseFromAcademy(b.dataset.release);
+    if(r.ok) toast(`${fullName(r.player)} released`, 2800);
+    playClickSound();
+    renderSquad();
+  });
 }
 
 function renderSquadList(host){
@@ -15894,18 +16019,25 @@ function expiringContracts(){
 function renewalVerdict(p){
   const club = clubById(state.clubId);
   const demand = wageDemand(p);
-  if(demand > maxWageFor(club))
+  // Casual is meant to be the mode where you keep the squad you build. The
+  // board indulges a renewal well past its usual ceiling rather than forcing
+  // you to watch a player you wanted leave on a free.
+  const wageCeiling = maxWageFor(club) * (isEasy() ? 1.6 : 1);
+  if(demand > wageCeiling)
     return {ok:false, reason:`wants ${fmtMoney(demand)}/week — beyond what the board sanction`};
-  if(demand > wageHeadroom(club.id) + (p.wage||0))
+  if(!isEasy() && demand > wageHeadroom(club.id) + (p.wage||0))
     return {ok:false, reason:`renewing at ${fmtMoney(demand)}/week would break the wage budget`};
   const interest = signingInterest(p, club, "free");
-  if(!interest.willing) return {ok:false, reason:interest.reason};
-  // Ambitious players in form, at a club punching below them, sometimes walk.
-  const expected = clamp((Math.max(ratingOf(p), potentialOf(p)*0.85) - 46) * 1.85, 5, 95);
-  const gap = expected - clubPrestige(club);
-  const refuseOdds = clamp((gap - 4) / 40, 0, 0.55) * (0.5 + (p.ambition||0.5));
-  if(Math.random() < refuseOdds)
-    return {ok:false, reason:"has decided to look for a new challenge"};
+  // On Casual a man you have offered terms to does not turn you down.
+  if(!isEasy() && !interest.willing) return {ok:false, reason:interest.reason};
+  if(!isEasy()){
+    // Ambitious players in form, at a club punching below them, sometimes walk.
+    const expected = clamp((Math.max(ratingOf(p), potentialOf(p)*0.85) - 46) * 1.85, 5, 95);
+    const gap = expected - clubPrestige(club);
+    const refuseOdds = clamp((gap - 4) / 40, 0, 0.55) * (0.5 + (p.ambition||0.5));
+    if(Math.random() < refuseOdds)
+      return {ok:false, reason:"has decided to look for a new challenge"};
+  }
   return {ok:true, demand};
 }
 
@@ -16703,11 +16835,9 @@ function openScouting(){
   document.getElementById("scoutBackdrop").classList.add("open");
 }
 
-/* Youth Watch — the international scouting network's own screen, reached via
-   the tab at the top of Scouting. Deliberately lighter-weight than the adult
-   brief: you're picking a country, not tuning six sliders, because you're
-   fishing blind for names nobody has heard of yet rather than targeting a
-   known man. */
+/* The scout's shortlist — what a returning scout brings back. He has watched
+   these boys for weeks, so nothing is hidden: you see what each can do now and
+   how far he might go, and decide who is worth a place in the academy. */
 function openYouthWatch(){
   resetScoutFooter();
   document.querySelector("#scoutBackdrop h2").textContent = "Scouting";
@@ -16715,40 +16845,24 @@ function openYouthWatch(){
   const sub = document.getElementById("scoutSub");
   if(!host) return;
   const ys = youthScoutState();
-  sub.textContent = ys.prospects.length + " of " + youthWatchCap() + " academy places used · " +
-    youthScoutsFree() + " scout" + (youthScoutsFree()===1?"":"s") + " available for youth trips";
+  sub.textContent = ys.shortlist.length + " on the shortlist · " +
+    academyPlayers().length + " of " + academyCap() + " academy places used · " +
+    youthScoutsFree() + " scout" + (youthScoutsFree()===1?"":"s") + " free";
   host.innerHTML = "";
 
   const group = t=>{ const h=document.createElement("div"); h.className="act-group"; h.textContent=t; host.appendChild(h); };
 
-  // --- tab switcher ---
   const tabs = document.createElement("div");
   tabs.className = "role-picker";
   tabs.innerHTML = `<div class="role-opts">
       <button class="role-opt" id="scoutTabPlayers">Players</button>
-      <button class="role-opt on" id="scoutTabYouth">Youth Watch${ys.prospects.length?` (${ys.prospects.length})`:""}</button>
+      <button class="role-opt on" id="scoutTabYouth">Youth${ys.shortlist.length?` (${ys.shortlist.length})`:""}</button>
     </div>`;
   host.appendChild(tabs);
   const tabPlayers = tabs.querySelector("#scoutTabPlayers");
   if(tabPlayers) tabPlayers.onclick = ()=>{ playClickSound(); openScouting(); };
 
-  // --- decisions that can't wait ---
-  const due = youthDecisionsDue();
-  if(due.length){
-    group("Decision needed");
-    const dueBox = document.createElement("div");
-    dueBox.innerHTML = due.map(p=>`<div class="scout-row"><span class="sr-body">
-        <span class="sr-title">${flagFor(p.nat)} ${fullName(p)} — turns 18</span>
-        <span class="sr-sub">${shownRating(p)} · ${shownPotential(p)} · ${posOf(p)} · ${youthCountryDef(p.prospectCountry).label}</span>
-      </span></div>
-      <div style="display:flex; gap:8px; margin:-4px 0 10px;">
-        <button class="btn-secondary" style="flex:1; padding:9px;" data-sign="${p.id}">Sign</button>
-        <button class="btn-secondary" style="flex:1; padding:9px; opacity:.75;" data-release="${p.id}">Release</button>
-      </div>`).join("");
-    host.appendChild(dueBox);
-  }
-
-  // --- out scouting abroad ---
+  // --- scouts currently abroad ---
   group("Scouts abroad");
   const out = document.createElement("div");
   if(!ys.assignments.length){
@@ -16758,7 +16872,7 @@ function openYouthWatch(){
       const wks = Math.max(0, a.due - state.week);
       return `<div class="scout-row"><span class="sr-body">
         <span class="sr-title">Scouting ${youthCountryDef(a.country).label}</span>
-        <span class="sr-sub">Report in ${wks} week${wks===1?"":"s"}</span></span></div>`;
+        <span class="sr-sub">Shortlist in ${wks} week${wks===1?"":"s"}</span></span></div>`;
     }).join("");
   }
   host.appendChild(out);
@@ -16768,61 +16882,84 @@ function openYouthWatch(){
   const brief = document.createElement("div");
   brief.innerHTML = `<div class="role-picker"><div class="role-picker-label">Country</div>
     <div class="role-opts">${YOUTH_SCOUT_COUNTRIES.map(c=>
-      `<button class="role-opt${state._youthPickCountry===c.id?" on":""}" data-yc="${c.id}">${c.label}</button>`).join("")}</div></div>
+      `<button class="role-opt${state._youthPickCountry===c.id?" on":""}" data-yc="${c.id}">${c.label} <span style="opacity:.65; font-size:10px;">${"\u2605".repeat(c.youth)}</span></button>`).join("")}</div></div>
     <div class="scout-row" style="margin-top:2px;"><span class="sr-body">
-      <span class="sr-sub">A trip abroad takes ${youthTripWeeks()} weeks and can turn up nobody at all — this is a long game, not a guaranteed haul.</span>
+      <span class="sr-sub">A trip takes ${youthTripWeeks()} weeks. He'll come back with a shortlist of boys aged ${YOUTH_PROSPECT_MIN_AGE}-${YOUTH_PROSPECT_MAX_AGE} and a real read on each of them. The stars are how much talent a country produces — the strongest nations give him more names and better ones, though a gem can come from anywhere.</span>
     </span></div>`;
   host.appendChild(brief);
 
+  const chosen = state._youthPickCountry || YOUTH_SCOUT_COUNTRIES[0].id;
   const sendBtn = document.createElement("button");
   sendBtn.className = "btn-secondary";
-  const chosen = state._youthPickCountry || YOUTH_SCOUT_COUNTRIES[0].id;
   sendBtn.textContent = youthScoutsFree() > 0 ? `Send Scout to ${youthCountryDef(chosen).label}` : "All scouts busy";
   sendBtn.disabled = youthScoutsFree() <= 0;
   sendBtn.onclick = ()=>{
     const r = startYouthAssignment(chosen);
-    toast(r.ok ? `Scout sent to ${youthCountryDef(chosen).label} — report in ${r.weeks} weeks` : r.reason, 3400);
+    toast(r.ok ? `Scout sent to ${youthCountryDef(chosen).label} — shortlist in ${r.weeks} weeks` : r.reason, 3400);
     if(r.ok) openYouthWatch();
   };
   host.appendChild(sendBtn);
 
-  // --- prospects being watched, not yet due a decision ---
-  const watching = ys.prospects.filter(p=> p.age < YOUTH_DECISION_AGE);
-  if(watching.length){
-    group("Watching (" + watching.length + ")");
-    const watch = document.createElement("div");
-    watch.innerHTML = watching.slice().sort((a,b)=>b.age-a.age).map(p=>{
-      const early = youthEarlySignable(p);
-      const g = p.growthLast;
-      const trend = g === undefined ? ""
-        : g >= 2 ? `<span style="color:var(--good); font-weight:700;"> ▲ kicked on</span>`
-        : g === 1 ? `<span style="color:var(--good);"> ▲ improving</span>`
-        : g === 0 ? `<span style="color:var(--text-dim);"> — stalled this year</span>`
-        : `<span style="color:var(--bad);"> ▼ slipped</span>`;
-      const yrs = p.yearsWatched ? ` · ${p.yearsWatched} yr${p.yearsWatched===1?"":"s"} watched` : "";
+  // --- the shortlist ---
+  if(ys.shortlist.length){
+    group("Shortlist (" + ys.shortlist.length + ")");
+    const note = document.createElement("div");
+    note.innerHTML = `<div class="scout-row"><span class="sr-body"><span class="sr-sub">
+      ${academyFree() > 0 ? `${academyFree()} academy place${academyFree()===1?"":"s"} free.` : "Your academy is full — release someone to take anyone else on."}
+      Anyone you don't sign will join another club in the summer.</span></span></div>`;
+    host.appendChild(note);
+
+    const list = document.createElement("div");
+    // Best ceiling first — that is what you are shopping for at this age.
+    list.innerHTML = ys.shortlist.slice().sort((a,b)=> potentialOf(b) - potentialOf(a)).map(p=>{
+      const now = Math.round(to100(p));
+      const ceil = Math.round(to100(potentialOf(p)));
+      const band = ceilingBand(p);
+      const col = band.cls === "good" ? "var(--good)" : band.cls === "dim" ? "var(--text-dim)" : "var(--text)";
       return `<div class="scout-row"><span class="sr-body">
-          <span class="sr-title">${flagFor(p.nat)} ${fullName(p)}<span class="tag" style="margin-left:6px;">${p.age}</span></span>
-          <span class="sr-sub">${shownRating(p)} · ${shownPotential(p)} · ${posOf(p)} · ${youthCountryDef(p.prospectCountry).label}${yrs}${trend}</span>
+          <span class="sr-title">${flagFor(p.nat)} ${fullName(p)}<span class="tag" style="margin-left:6px;">${p.age}</span><span class="tag" style="margin-left:4px;">${posOf(p)}</span></span>
+          <span class="sr-sub"><span style="color:${col}; font-weight:${band.weight};">${band.text}</span> · now <strong>${now}</strong>, ceiling <strong>${ceil}</strong> · ${youthCountryDef(p.prospectCountry).label}</span>
         </span></div>
-        ${early ? `<div style="display:flex; gap:8px; margin:-4px 0 10px;">
-          <button class="btn-secondary" style="flex:1; padding:8px; font-size:12.5px;" data-sign="${p.id}">Sign early</button>
-          <button class="btn-secondary" style="flex:1; padding:8px; font-size:12.5px; opacity:.75;" data-release="${p.id}">Release</button>
-        </div>` : `<div class="scout-row" style="padding-top:0;"><span class="sr-body"><span class="sr-sub" style="opacity:.7;">Too young to sign yet — eligible from ${YOUTH_EARLY_SIGN_AGE}.</span></span></div>`}`;
+        <div style="display:flex; gap:8px; margin:-4px 0 10px;">
+          <button class="btn-secondary" style="flex:1; padding:8px; font-size:12.5px;" data-sign="${p.id}"${academyFree()<=0?" disabled":""}>Sign to academy</button>
+          <button class="btn-secondary" style="flex:1; padding:8px; font-size:12.5px; opacity:.75;" data-pass="${p.id}">Pass</button>
+        </div>`;
     }).join("");
-    host.appendChild(watch);
+    host.appendChild(list);
+
+    const clearBtn = document.createElement("button");
+    clearBtn.className = "btn-secondary";
+    clearBtn.style.opacity = ".75";
+    clearBtn.textContent = "Pass on the rest";
+    clearBtn.onclick = ()=>{
+      const n = clearShortlist();
+      toast(`Passed on ${n} player${n===1?"":"s"}`, 2600);
+      playClickSound();
+      openYouthWatch();
+    };
+    host.appendChild(clearBtn);
   }
 
-  // wiring
+  // --- pointer to the academy itself ---
+  if(academyPlayers().length){
+    group("Your academy");
+    const ac = document.createElement("div");
+    ac.innerHTML = `<div class="scout-row"><span class="sr-body">
+      <span class="sr-title">${academyPlayers().length} player${academyPlayers().length===1?"":"s"} on the books</span>
+      <span class="sr-sub">Manage them in the Academy tab under Squad.</span></span></div>`;
+    host.appendChild(ac);
+  }
+
   host.querySelectorAll("[data-yc]").forEach(b=> b.onclick = ()=>{ state._youthPickCountry = b.dataset.yc; playClickSound(); openYouthWatch(); });
   host.querySelectorAll("[data-sign]").forEach(b=> b.onclick = ()=>{
-    const r = signYouthProspect(b.dataset.sign);
-    toast(r.ok ? "Signed on youth forms" : r.reason, 3200);
+    const r = signToAcademy(b.dataset.sign);
+    toast(r.ok ? `${fullName(r.player)} joins the academy` : r.reason, 3200);
     playClickSound();
     openYouthWatch();
   });
-  host.querySelectorAll("[data-release]").forEach(b=> b.onclick = ()=>{
-    const r = releaseYouthProspect(b.dataset.release);
-    toast(r.ok ? `${fullName(r.player)} released` : r.reason, 3200);
+  host.querySelectorAll("[data-pass]").forEach(b=> b.onclick = ()=>{
+    const r = passOnProspect(b.dataset.pass);
+    if(r.ok) toast(`Passed on ${fullName(r.player)}`, 2400);
     playClickSound();
     openYouthWatch();
   });
@@ -17601,6 +17738,11 @@ function tickScouting(){
     return false;
   });
 
+  // Re-queues are collected here rather than pushed straight back onto
+  // sc.assignments: the filter below REPLACES that array with its return
+  // value, so anything pushed during the pass was being thrown away and
+  // continuous scouting never repeated after its first report.
+  const requeue = [];
   sc.assignments = sc.assignments.filter(a=>{
     const elapsed = (state.season - a.season) * CALENDAR_WEEKS + (state.week - a.due);
     if(elapsed < 0) return true;
@@ -17614,10 +17756,11 @@ function tickScouting(){
     // If this assignment is set to auto-repeat and scout quality is high enough, re-queue it
     if(a.isAuto && scoutQuality() >= 4){
       const weeks = clamp(7 - scoutQuality(), 3, 6);
-      sc.assignments.push(Object.assign({}, a, {due: state.week + weeks, season: state.season}));
+      requeue.push(Object.assign({}, a, {due: state.week + weeks, season: state.season}));
     }
     return false;
   });
+  if(requeue.length) sc.assignments = sc.assignments.concat(requeue);
 
   if(done.length){
     state.scoutReports = (state.scoutReports || []).concat(done.map(d=>({
@@ -17683,47 +17826,92 @@ function runAssignment(a){
 }
 
 /* =========================================================================
-   YOUTH SCOUTING — a global network separate from first-team recruitment.
-   Send a scout to one of ten countries; he comes back weeks later with a
-   handful of 13-16 year olds he's watched play for a local side or school.
-   They sit in your Youth Watch, ageing for real each season, entirely
-   outside your 30-man squad — a prospect there costs nothing but attention.
-   From 15 you may sign one early if you're sure. At 18 the decision can't
-   be put off any longer: sign him on senior forms or release him, the same
-   choice every real academy makes about every kid who doesn't make the cut.
-   Gated on the Recruitment Centre, like adult scouting, since this is a
-   scouting operation — Youth Academy investment still governs the separate
-   home-grown intake in runYouthRotation().
+   THE ACADEMY — the club's own youth setup, and the global network that
+   feeds it. Send a scout to one of thirteen countries; weeks later he comes
+   back with a shortlist of boys he has watched, and because he has watched
+   them properly you see what they might become rather than guessing.
+
+   Sign whoever you want onto academy forms and they join the academy team,
+   which sits entirely outside your 30-man senior squad — a boy there costs
+   you a place in nothing. He ages and improves under your coaching, and at
+   eighteen the decision can't be deferred any longer: professional terms in
+   the first-team squad, or released, which is the same choice every real
+   academy makes about every kid who doesn't quite make it.
+
+   Structured deliberately so youth fixtures can be laid on top later: the
+   academy is a squad in its own right, with its own list, its own ages and
+   its own record, exactly as an under-18 side would need.
    ========================================================================= */
+/* Where you send a scout matters. Every football nation has its own standard
+   of youth production — the great academies of Brazil, Spain and France turn
+   out more genuine talent than a small federation does, and a scout sent
+   there comes back with both more names and better ones. The smaller nations
+   are not a waste of a trip: a gem can come from anywhere, it is just rarer.
+   `youth` is that national standard, 1 (modest) to 5 (elite). */
 const YOUTH_SCOUT_COUNTRIES = [
-  {id:"england", label:"England", nat:"English"},
-  {id:"wales", label:"Wales", nat:"Welsh"},
-  {id:"scotland", label:"Scotland", nat:"Scottish"},
-  {id:"ireland", label:"Ireland", nat:"Irish"},
-  {id:"spain", label:"Spain", nat:"Spanish"},
-  {id:"italy", label:"Italy", nat:"Italian"},
-  {id:"germany", label:"Germany", nat:"German"},
-  {id:"france", label:"France", nat:"French"},
-  {id:"netherlands", label:"Netherlands", nat:"Dutch"},
-  {id:"portugal", label:"Portugal", nat:"Portuguese"},
-  {id:"belgium", label:"Belgium", nat:"Belgian"},
-  {id:"brazil", label:"Brazil", nat:"Brazilian"},
-  {id:"argentina", label:"Argentina", nat:"Argentine"},
+  {id:"brazil",      label:"Brazil",      nat:"Brazilian",  youth:5},
+  {id:"france",      label:"France",      nat:"French",     youth:5},
+  {id:"spain",       label:"Spain",       nat:"Spanish",    youth:5},
+  {id:"argentina",   label:"Argentina",   nat:"Argentine",  youth:4},
+  {id:"germany",     label:"Germany",     nat:"German",     youth:4},
+  {id:"portugal",    label:"Portugal",    nat:"Portuguese", youth:4},
+  {id:"netherlands", label:"Netherlands", nat:"Dutch",      youth:4},
+  {id:"england",     label:"England",     nat:"English",    youth:4},
+  {id:"italy",       label:"Italy",       nat:"Italian",    youth:3},
+  {id:"belgium",     label:"Belgium",     nat:"Belgian",    youth:3},
+  {id:"scotland",    label:"Scotland",    nat:"Scottish",   youth:2},
+  {id:"ireland",     label:"Ireland",     nat:"Irish",      youth:2},
+  {id:"wales",       label:"Wales",       nat:"Welsh",      youth:2},
 ];
+function youthNationRating(id){ const c = youthCountryDef(id); return c.youth || 3; }
 function youthCountryDef(id){ return YOUTH_SCOUT_COUNTRIES.find(c=>c.id===id) || YOUTH_SCOUT_COUNTRIES[0]; }
 
 const YOUTH_PROSPECT_MIN_AGE = 13;
 const YOUTH_PROSPECT_MAX_AGE = 16;
-const YOUTH_EARLY_SIGN_AGE = 15;    // earliest you can sign one before the forced decision
-const YOUTH_DECISION_AGE = 18;      // sign now or release — no more waiting
+const ACADEMY_PRO_AGE = 18;          // professional terms or released — no more waiting
+const ACADEMY_PLACES = [16, 18, 20, 24, 26];   // by Youth Academy level 1-5
+
+/* How a scout describes a ceiling. Reading "an exciting prospect" tells you
+   far more at a glance than a bare number does, which is how every game in
+   this genre presents a young player worth signing. */
+function ceilingBand(p){
+  const c = to100(potentialOf(p));
+  if(c >= 88) return {text:"Potential to be special", cls:"good", weight:700};
+  if(c >= 80) return {text:"An exciting prospect",    cls:"good", weight:700};
+  if(c >= 72) return {text:"Showing great potential", cls:"good", weight:600};
+  if(c >= 64) return {text:"Could make the grade",    cls:"",     weight:500};
+  if(c >= 56) return {text:"Squad player at best",    cls:"dim",  weight:400};
+  return {text:"Unlikely to make it", cls:"dim", weight:400};
+}
 
 function youthScoutState(){
-  if(!state.youthScouting) state.youthScouting = {prospects: [], assignments: []};
+  if(!state.youthScouting) state.youthScouting = {assignments: [], shortlist: []};
   const ys = state.youthScouting;
-  ys.prospects = ys.prospects || [];
   ys.assignments = ys.assignments || [];
+  ys.shortlist   = ys.shortlist   || [];
+  // Anyone left over from the old Youth Watch is a boy you were already
+  // tracking, so he joins the academy rather than quietly disappearing.
+  if(ys.prospects && ys.prospects.length){
+    const ac = academyState();
+    ys.prospects.forEach(p=>{ p.isAcademy = true; ac.players.push(p); });
+    ys.prospects = [];
+  }
   return ys;
 }
+
+function academyState(){
+  if(!state.academy) state.academy = {players: []};
+  state.academy.players = state.academy.players || [];
+  return state.academy;
+}
+
+function academyCap(){
+  const club = clubById(state.clubId);
+  const youthLevel = (club && club.facilities && club.facilities.youth) || 2;
+  return ACADEMY_PLACES[clamp(youthLevel, 1, 5) - 1];
+}
+function academyPlayers(){ return academyState().players; }
+function academyFree(){ return Math.max(0, academyCap() - academyPlayers().length); }
 
 function youthScoutsBusy(){ return youthScoutState().assignments.length; }
 function youthScoutsFree(){ return Math.max(0, scoutCount() - scoutsBusy() - youthScoutsBusy()); }
@@ -17731,8 +17919,12 @@ function youthScoutsFree(){ return Math.max(0, scoutCount() - scoutsBusy() - you
 // A trip abroad takes longer than a domestic first-team look — you're
 // covering youth leagues and school football, not one club's fixture list.
 function youthTripWeeks(){ return clamp(9 - scoutQuality(), 5, 8); }
-// How many kids a trip turns up. A weak setup might strike out entirely.
-function youthTripYield(){ return clamp(Math.round(1 + scoutQuality() * 0.6), 1, 4); }
+// How many boys he comes back having watched. A proper shortlist, not a
+// couple of names: this is weeks of work across a country's youth football.
+function youthTripYield(countryId){
+  const nation = countryId ? youthNationRating(countryId) : 3;
+  return clamp(6 + scoutQuality() * 2 + nation + rndInt(0,3), 8, 18);
+}
 
 function startYouthAssignment(countryId){
   if(youthScoutsFree() <= 0) return {ok:false, reason:"All your scouts are already out."};
@@ -17743,20 +17935,24 @@ function startYouthAssignment(countryId){
   return {ok:true, weeks};
 }
 
-// One prospect, freshly discovered. Deliberately raw: the point of scouting
-// this young is uncertainty, so overall sits well below what an academy
-// intake of the same age would show, and the ceiling roll is the same
+// One boy on the shortlist. Deliberately raw: the point of looking this young
+// is that almost nothing is settled yet, so what he can do today sits well
+// below an academy intake of the same age, and the ceiling roll is the same
 // wonderkid-capable curve used everywhere else in the game.
 function makeYouthProspect(countryId){
   const country = youthCountryDef(countryId);
   const nm = nameForNationality(country.nat);
   const age = rndInt(YOUTH_PROSPECT_MIN_AGE, YOUTH_PROSPECT_MAX_AGE);
   const pos = pick(["GK","DF","DF","MD","MD","FW"]);
-  // Recruitment quality nudges the odds of a real one the same way academy
-  // level does for home-grown intake — a level-5 setup is roughly twice as
-  // likely to turn up a gem abroad as a level-1 one.
-  const tierBonus = (scoutQuality() - 1) * 0.35;
-  const overall = clamp(rndInt(2, 8) - Math.max(0, YOUTH_PROSPECT_MAX_AGE - age), 1, 10);
+  // Your scout's judgement and the nation's own standard both push the ceiling,
+  // and the standard is the heavier of the two: a good scout finds the best of
+  // what is in front of him, but he cannot conjure a Brazilian academy out of
+  // a country that hasn't got one.
+  const nation = youthNationRating(countryId);
+  const tierBonus = (scoutQuality() - 1) * 0.28 + (nation - 3) * 1.25;
+  // Strong footballing nations coach their boys better before anyone scouts them.
+  const nationHead = nation >= 5 ? 2 : nation >= 4 ? 1 : nation <= 2 ? -1 : 0;
+  const overall = clamp(rndInt(2, 8) + nationHead - Math.max(0, YOUTH_PROSPECT_MAX_AGE - age), 1, 11);
   const p = makePlayer("__prospect__", nm.first, nm.last, age, pos, overall, false, country.nat, tierBonus);
   p.isYouth = true;
   p.isProspect = true;
@@ -17766,56 +17962,36 @@ function makeYouthProspect(countryId){
   return p;
 }
 
-// How many boys your academy can keep on its books at once. A bigger setup
-// holds more, which is another reason to invest in it. It also stops the Watch
-// growing without limit over a long career — prospects only leave at 18, so
-// with several scouts running continuously the list would otherwise reach
-// hundreds and bloat the save.
-const YOUTH_WATCH_PLACES = [16, 18, 20, 24, 26];   // by Youth Academy level 1-5
-function youthWatchCap(){
-  const club = clubById(state.clubId);
-  const youthLevel = (club && club.facilities && club.facilities.youth) || 2;
-  return YOUTH_WATCH_PLACES[clamp(youthLevel, 1, 5) - 1];
-}
-
-// Runs each week. Anything due comes back with 1-4 names.
+// Runs each week. A returning scout files his shortlist for you to look at.
 function tickYouthScouting(){
   const ys = youthScoutState();
   const done = [];
-  const cap = youthWatchCap();
-  let turnedAway = 0;
   ys.assignments = ys.assignments.filter(a=>{
     const elapsed = (state.season - a.season) * CALENDAR_WEEKS + (state.week - a.due);
     if(elapsed < 0) return true;
-    const n = youthTripYield();
+    const n = youthTripYield(a.country);
     const found = [];
-    for(let i=0;i<n;i++){
-      if(Math.random() < 0.22) continue; // trips can come back thin, or empty
-      if(ys.prospects.length + found.length >= cap){ turnedAway++; continue; }
-      found.push(makeYouthProspect(a.country));
-    }
-    found.forEach(p=> ys.prospects.push(p));
+    for(let i=0;i<n;i++) found.push(makeYouthProspect(a.country));
+    found.forEach(p=>{ p.shortlistedWeek = state.week; p.shortlistedSeason = state.season; });
+    ys.shortlist = ys.shortlist.concat(found);
     done.push({country: a.country, found});
     return false;
   });
-  if(turnedAway){
-    pushNews("Academy at capacity",
-      `Your scouts had to pass on ${turnedAway} young player${turnedAway===1?"":"s"} — the academy is full at ${cap} places. Release someone or expand the Youth Academy to take on more.`,
-      "board");
-  }
+  done.forEach(d=>{
+    pushNews("Scout returns from " + youthCountryDef(d.country).label,
+      `He has watched ${d.found.length} young players and filed a shortlist. Their ratings and ceilings are in the Academy — he has seen enough of them to be sure.`,
+      "squad");
+  });
   if(done.length) saveState(true);
   return done;
 }
 
-// Ages every prospect by one year at season rollover. Anyone who reaches the
-// decision age and is still undecided is force-released — put off long
-// enough and the choice makes itself, same as it would at a real club.
-/* A prospect improves while he is with you, which is the entire point of
-   watching one for years. He has no first-team football to accelerate him, so
-   growth leans almost entirely on the Youth Academy level — which is what
-   makes that upgrade worth buying alongside the Recruitment Centre that found
-   him. Not every kid kicks on: some stall, a few leap, and that uncertainty is
-   what makes the decision at 18 a real decision rather than a formality. */
+/* A boy improves while he is with you, which is the whole point of taking one
+   on this young. He has no first-team football to accelerate him, so growth
+   leans almost entirely on the Youth Academy level — which is what makes that
+   upgrade worth buying alongside the Recruitment Centre that found him. Not
+   every kid kicks on: some stall, a few leap, and that uncertainty is what
+   makes the decision at eighteen a real one. */
 function developProspect(p){
   const club = clubById(state.clubId);
   const youthLevel = (club && club.facilities && club.facilities.youth) || 2;
@@ -17835,17 +18011,11 @@ function developProspect(p){
   const before = p.overall;
   for(let i = 0; i < steps * 3; i++){
     if(p.overall >= ceiling) break;
-    // One key, picked once. Reading one attribute and writing to another —
-    // which is what calling pick() twice in the same statement does — let a
-    // weak attribute inherit a strong one's value in a single step.
     const k = pick(keys);
     const prev = p[k];
     p[k] = clamp(prev + 1, 1, 20);
     recomputeOverall(p);
     if(p.overall > ceiling){
-      // Never step past his ceiling: recomputeOverall raises potential to meet
-      // a higher rating, so an overshoot here would quietly lift the ceiling
-      // itself and a limited player could grow forever.
       p[k] = prev;
       recomputeOverall(p);
       p.potential = ceiling;
@@ -17855,76 +18025,126 @@ function developProspect(p){
   recomputeOverall(p);
   if(p.potential > ceiling) p.potential = ceiling;
   p.growthLast = p.overall - before;
-  p.yearsWatched = (p.yearsWatched || 0) + 1;
+  p.yearsInAcademy = (p.yearsInAcademy || 0) + 1;
   return p.growthLast;
 }
 
-function ageYouthProspects(){
-  const ys = youthScoutState();
-  const forcedReleases = [];
+// Season rollover. Everyone in the academy is a year older and, with luck and
+// a good setup, a year better. Anyone who reaches eighteen needs a decision.
+function ageAcademy(){
+  const ac = academyState();
   const kickedOn = [];
-  ys.prospects = ys.prospects.filter(p=>{
+  ac.players.forEach(p=>{
     p.age++;
-    // A year older and, with luck and a good academy, a year better.
     const grew = developProspect(p);
     if(grew >= 2) kickedOn.push(p);
-    if(p.age >= YOUTH_DECISION_AGE){
-      forcedReleases.push(p);
-      return false;
-    }
-    return true;
   });
+  // A shortlist goes stale — those boys sign elsewhere over the summer.
+  const ys = youthScoutState();
+  if(ys.shortlist.length){
+    pushNews("Shortlist cleared",
+      `${ys.shortlist.length} boy${ys.shortlist.length===1?"":"s"} you were shown but didn't sign have joined other clubs over the summer.`, "squad");
+    ys.shortlist = [];
+  }
   if(kickedOn.length){
     pushNews("Academy report",
       kickedOn.map(p=>`${fullName(p)} (${p.age}) has come on strongly this year`).join(". ") + ".",
-      "board");
+      "squad");
   }
-  if(forcedReleases.length){
-    pushNews("Prospects released",
-      `${forcedReleases.length} youth prospect${forcedReleases.length===1?"":"s"} reached 18 without a decision and left to find a club elsewhere: ${forcedReleases.map(fullName).join(", ")}.`,
-      "board");
-  }
-  return forcedReleases;
+  return academyDecisionsDue();
 }
 
-// Prospects due a decision this season (18) or eligible for early signing (15+).
-function youthDecisionsDue(){
-  return youthScoutState().prospects.filter(p=> p.age >= YOUTH_DECISION_AGE);
+// Boys who have reached eighteen and need professional terms or releasing.
+function academyDecisionsDue(){
+  return academyPlayers().filter(p=> p.age >= ACADEMY_PRO_AGE);
 }
-function youthEarlySignable(p){ return p.age >= YOUTH_EARLY_SIGN_AGE; }
 
-// Bring a prospect onto senior scholarship terms. Simpler than an adult
-// free-transfer signing — no bonus, no negotiation, just a youth contract —
-// since a 15-18 year old isn't choosing between suitors the way a pro is.
-function signYouthProspect(prospectId){
-  const club = clubById(state.clubId);
+// Take a boy from the scout's shortlist onto academy forms.
+// Your club's own annual intake. These boys come up through the junior sides
+// rather than off a scout's shortlist, so they arrive already on the books —
+// but the academy has finite places, and if it is full the surplus are let go
+// with a word, rather than silently vanishing.
+function intakeToAcademy(p){
+  const ac = academyState();
+  if(ac.players.length >= academyCap()){
+    (state._intakeOverflow = state._intakeOverflow || []).push(p);
+    return false;
+  }
+  p.clubId = "__academy__";
+  p.isAcademy = true;
+  p.isYouth = true;
+  p.joinedAcademySeason = state.season;
+  ac.players.push(p);
+  return true;
+}
+
+function signToAcademy(prospectId){
   const ys = youthScoutState();
-  const p = ys.prospects.find(x=> x.id === prospectId);
-  if(!p) return {ok:false, reason:"That prospect is no longer available."};
-  if(state.squads[club.id].length >= SQUAD_MAX) return {ok:false, reason:"Your squad is full (30 maximum)."};
-  ys.prospects = ys.prospects.filter(x=> x !== p);
+  const ac = academyState();
+  const p = ys.shortlist.find(x=> x.id === prospectId);
+  if(!p) return {ok:false, reason:"He is no longer on the shortlist."};
+  if(ac.players.length >= academyCap())
+    return {ok:false, reason:`The academy is full at ${academyCap()} places. Release someone or expand the Youth Academy.`};
+  ys.shortlist = ys.shortlist.filter(x=> x !== p);
+  p.clubId = "__academy__";
+  p.isAcademy = true;
+  p.isProspect = false;
+  p.joinedAcademySeason = state.season;
+  p.morale = Math.max(p.morale || 12, 14);
+  ac.players.push(p);
+  pushNews("Academy signing",
+    `${fullName(p)} (${p.age}) has joined the academy from ${youthCountryDef(p.prospectCountry).label}.`, "squad");
+  saveState(true);
+  return {ok:true, player:p};
+}
+
+function passOnProspect(prospectId){
+  const ys = youthScoutState();
+  const p = ys.shortlist.find(x=> x.id === prospectId);
+  if(!p) return {ok:false, reason:"He is no longer on the shortlist."};
+  ys.shortlist = ys.shortlist.filter(x=> x !== p);
+  saveState(true);
+  return {ok:true, player:p};
+}
+
+function clearShortlist(){
+  const ys = youthScoutState();
+  const n = ys.shortlist.length;
+  ys.shortlist = [];
+  saveState(true);
+  return n;
+}
+
+// Professional terms: he leaves the academy and joins the senior squad.
+function promoteFromAcademy(playerId){
+  const club = clubById(state.clubId);
+  const ac = academyState();
+  const p = ac.players.find(x=> x.id === playerId);
+  if(!p) return {ok:false, reason:"He is no longer in the academy."};
+  if(state.squads[club.id].length >= SQUAD_MAX)
+    return {ok:false, reason:"Your senior squad is full (30 maximum)."};
+  ac.players = ac.players.filter(x=> x !== p);
   p.clubId = club.id;
   p.isYouth = true;
-  p.isProspect = false;
+  p.isAcademy = false;
   p.wage = Math.max(150, Math.round(playerWage(p, club.tier) * 0.25));
   p.contractYears = clamp(20 - p.age, 2, 4);
   p.renewalHandled = null;
-  p.morale = Math.max(p.morale || 12, 14);
+  p.morale = Math.max(p.morale || 12, 15);
   state.squads[club.id].push(p);
-  pushNews("Youth signing",
-    `${fullName(p)} (${p.age}) has signed his first professional forms at ${club.name} after being watched abroad.`, "transfer");
+  pushNews("Professional terms",
+    `${fullName(p)} (${p.age}) has signed his first professional contract and joins the first-team squad.`, "squad");
   checkAchievements({signedPlayer:true, signedFee:0});
-  squadIntegrityCheck("after youth signing");
+  squadIntegrityCheck("after academy promotion");
   saveState(true);
-  return {ok:true};
+  return {ok:true, player:p};
 }
 
-// Let him go rather than take up a squad spot. He simply leaves the pool.
-function releaseYouthProspect(prospectId){
-  const ys = youthScoutState();
-  const p = ys.prospects.find(x=> x.id === prospectId);
-  if(!p) return {ok:false, reason:"That prospect is no longer available."};
-  ys.prospects = ys.prospects.filter(x=> x !== p);
+function releaseFromAcademy(playerId){
+  const ac = academyState();
+  const p = ac.players.find(x=> x.id === playerId);
+  if(!p) return {ok:false, reason:"He is no longer in the academy."};
+  ac.players = ac.players.filter(x=> x !== p);
   saveState(true);
   return {ok:true, player:p};
 }
@@ -18021,11 +18241,21 @@ function tickPositionTraining(){
     const t = p.training;
 
     if(club.balance < t.costPerWeek){
-      // No money, no coaching. The work so far isn't lost, it just stops.
-      pushNews("Coaching suspended",
-        `${fullName(p)} has stopped working on ${t.pos} — the club can't cover the cost.`, "board");
-      p.training = null;
+      // No money, no coaching. The work so far genuinely isn't lost now — it
+      // used to set training to null here, which threw away every week of
+      // progress the moment the balance dipped, so a position being learned
+      // could simply vanish between seasons with only a passing news item.
+      if(!t.paused){
+        t.paused = true;
+        pushNews("Coaching paused",
+          `${fullName(p)} has had to stop working on ${t.pos} — the club can't cover the cost this week. His progress is kept and the work resumes when there's money for it.`, "board");
+      }
       return;
+    }
+    if(t.paused){
+      t.paused = false;
+      pushNews("Coaching resumed",
+        `${fullName(p)} is back working on ${t.pos}, picking up where he left off.`, "squad");
     }
     club.balance -= t.costPerWeek;
 
@@ -18040,10 +18270,16 @@ function tickPositionTraining(){
       const list = positionsOf(p);
       if(list.length < MAX_POSITIONS){
         if(!p.pos3) p.pos3 = t.pos; else p.pos4 = t.pos;
+        learned.push({player:p, pos:t.pos});
+        pushNews("New position learned",
+          `${fullName(p)} can now play ${t.pos}.`, "squad");
+      } else {
+        // He finished the work with no slot left to record it in. Saying he
+        // had learned it anyway was how a "new position" could appear and
+        // then never show up on his card.
+        pushNews("Coaching finished",
+          `${fullName(p)} has completed his work on ${t.pos}, but already covers as many positions as he can hold.`, "squad");
       }
-      learned.push({player:p, pos:t.pos});
-      pushNews("New position learned",
-        `${fullName(p)} can now play ${t.pos}.`, "squad");
       p.training = null;
     }
   });
