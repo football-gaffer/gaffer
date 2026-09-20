@@ -4471,11 +4471,12 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "4.4.0";
+const GAME_VERSION = "4.5.0";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
 const VERSION_NOTES = {
+  "4.5.0": "The decision at eighteen is now a real one. A boy who reaches it appears in your action list with his rating, his ceiling and what your coaches make of him, and you either give him professional terms and a place in the first-team squad or let him go. You get the full season to make your mind up — but if you never answer him, he leaves for a club that will, which the Academy screen had been promising all along without the game actually doing it. Also trimmed two things that grew forever in the save: every scouting report ever filed, when only the last few are ever shown, and the memorial list.",
   "4.4.0": "The academy, deepened. Where you send a scout now matters: every nation carries its own standard of youth production, shown as stars, and the great ones give him both more names and better ones — though a gem can still come from anywhere. Scouts describe a boy the way a coach would, from 'unlikely to make it' up to 'potential to be special', so a shortlist reads at a glance. And your own annual intake now comes up into the academy rather than straight into the first-team squad, with an intake-day report naming the boy your coaches think most of.",
   "4.3.0": "The Academy. Send a scout to any of thirteen countries and he comes back weeks later with a shortlist of eight to sixteen boys aged 13 to 16 — and because he has watched them properly, you see exactly what each can do now and how far he might go. Sign whoever you want onto academy forms and they join your academy team, which has its own tab under Squad and sits completely outside the 30-man senior squad. They age and improve under your coaching, driven by your Youth Academy level, and at eighteen you either give them professional terms and a place in the first-team squad or let them go. Anyone you passed on signs elsewhere in the summer.",
   "4.2.0": "Three fixes. Continuous scouting never repeated after its first report — the re-queued assignment was being discarded the moment it was made, so scouts looked stuck. Position coaching is no longer thrown away when the balance dips; it pauses and resumes with the progress intact, which is why a position being learned could vanish between seasons. And Casual is now actually casual: nobody walks out on a renewal you offer, and the board will go well past its usual wage ceiling to keep a player rather than let him leave on a free.",
@@ -7936,6 +7937,8 @@ function recordPassing(p, clubId){
     "tribute", clubId);
   if(!state.memorials) state.memorials = [];
   state.memorials.push({name:fullName(p), age:p.age, season:state.season, club:club?club.name:""});
+  // Bounded, so a long career doesn't carry every name forever.
+  if(state.memorials.length > 60) state.memorials = state.memorials.slice(-60);
 }
 
 /* ---- Football families ----
@@ -16139,6 +16142,28 @@ function collectActions(){
   const club = clubById(state.clubId);
   if(!club) return acts;
 
+  // --- Academy boys who have turned eighteen ---------------------------
+  if(typeof academyDecisionsDue === "function"){
+    academyDecisionsDue().forEach(p=>{
+      const band = ceilingBand(p);
+      const full = (state.squads[club.id]||[]).length >= SQUAD_MAX;
+      acts.push({group:"Academy", icon:"\uD83C\uDF93",
+        title:`${fullName(p)} has turned ${ACADEMY_PRO_AGE}`,
+        sub:`${posOf(p)} · now ${Math.round(to100(p))}, ceiling ${Math.round(to100(potentialOf(p)))} · ${band.text.toLowerCase()} · professional terms or released, this season`,
+        go:"squad", player:p.id,
+        buttons:[
+          {label: full ? "Squad full (30)" : "Professional terms", run:()=>{
+            const r = promoteFromAcademy(p.id);
+            return r.ok ? `${fullName(p)} signs professional terms` : r.reason;
+          }},
+          {label:"Release", run:()=>{
+            const r = releaseFromAcademy(p.id);
+            return r.ok ? `${fullName(p)} released` : r.reason;
+          }},
+        ]});
+    });
+  }
+
   // --- Bids for your players -------------------------------------------
   (state.offers||[]).forEach(o=>{
     const p = playerById(o.playerId);
@@ -17771,6 +17796,10 @@ function tickScouting(){
       brief: d.brief || null,
       week: state.week, season: state.season,
     })));
+    // Only the last handful are ever shown, but every report ever filed was
+    // being carried in the save — with continuous scouting that is hundreds of
+    // entries and a real slice of a save this game has already hit limits on.
+    if(state.scoutReports.length > 30) state.scoutReports = state.scoutReports.slice(-30);
   }
   return done;
 }
@@ -18034,11 +18063,25 @@ function developProspect(p){
 function ageAcademy(){
   const ac = academyState();
   const kickedOn = [];
+  const walked = [];
   ac.players.forEach(p=>{
     p.age++;
     const grew = developProspect(p);
     if(grew >= 2) kickedOn.push(p);
   });
+  // He turned eighteen a year ago and still has no answer from you. A boy in
+  // that position finds a club that will give him one. You get a full season
+  // to decide, and the Academy screen and the action list both say so — but
+  // the deadline is real, which is what makes the decision a decision.
+  ac.players = ac.players.filter(p=>{
+    if(p.age > ACADEMY_PRO_AGE){ walked.push(p); return false; }
+    return true;
+  });
+  if(walked.length){
+    pushNews("Academy players leave",
+      `${walked.map(fullName).join(", ")} ${walked.length===1?"has":"have"} left for a club willing to offer professional terms. ` +
+      `${walked.length===1?"He was":"They were"} waiting on your decision for a full season.`, "board");
+  }
   // A shortlist goes stale — those boys sign elsewhere over the summer.
   const ys = youthScoutState();
   if(ys.shortlist.length){
