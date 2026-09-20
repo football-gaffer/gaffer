@@ -4471,11 +4471,12 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "4.5.0";
+const GAME_VERSION = "4.5.1";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
 const VERSION_NOTES = {
+  "4.5.1": "Fixes a crash that broke the whole Scouting screen: the Players tab was still counting the old youth list, which no longer exists after the Academy rewrite.",
   "4.5.0": "The decision at eighteen is now a real one. A boy who reaches it appears in your action list with his rating, his ceiling and what your coaches make of him, and you either give him professional terms and a place in the first-team squad or let him go. You get the full season to make your mind up — but if you never answer him, he leaves for a club that will, which the Academy screen had been promising all along without the game actually doing it. Also trimmed two things that grew forever in the save: every scouting report ever filed, when only the last few are ever shown, and the memorial list.",
   "4.4.0": "The academy, deepened. Where you send a scout now matters: every nation carries its own standard of youth production, shown as stars, and the great ones give him both more names and better ones — though a gem can still come from anywhere. Scouts describe a boy the way a coach would, from 'unlikely to make it' up to 'potential to be special', so a shortlist reads at a glance. And your own annual intake now comes up into the academy rather than straight into the first-team squad, with an intake-day report naming the boy your coaches think most of.",
   "4.3.0": "The Academy. Send a scout to any of thirteen countries and he comes back weeks later with a shortlist of eight to sixteen boys aged 13 to 16 — and because he has watched them properly, you see exactly what each can do now and how far he might go. Sign whoever you want onto academy forms and they join your academy team, which has its own tab under Squad and sits completely outside the 30-man senior squad. They age and improve under your coaching, driven by your Youth Academy level, and at eighteen you either give them professional terms and a place in the first-team squad or let them go. Anyone you passed on signs elsewhere in the summer.",
@@ -16728,7 +16729,7 @@ function openScouting(){
   tabs.className = "role-picker";
   tabs.innerHTML = `<div class="role-opts">
       <button class="role-opt on" id="scoutTabPlayers">Players</button>
-      <button class="role-opt" id="scoutTabYouth">Youth Watch${youthScoutState().prospects.length?` (${youthScoutState().prospects.length})`:""}</button>
+      <button class="role-opt" id="scoutTabYouth">Youth${(()=>{const n=youthScoutState().shortlist.length; return n?` (${n})`:"";})()}</button>
     </div>`;
   host.appendChild(tabs);
   const tabYouth = tabs.querySelector("#scoutTabYouth");
