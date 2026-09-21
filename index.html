@@ -2990,6 +2990,90 @@ function fillerOverall(tierId, isShadow){
   return rndInt(base-3, base+3);
 }
 
+/* Shirt numbers. The game had none at all, which for a football club is an
+   odd thing to be missing. Numbers are handed out the way a club does it —
+   the keeper takes 1, defenders the low numbers, midfield the middle, forwards
+   9 and 10 and 11 — and then whatever is left goes out in order. Every number
+   in a squad is unique, and a player keeps his when the squad changes around
+   him. */
+const SQUAD_NO_PREFERENCE = {
+  GK: [1, 13, 21, 25, 31],
+  DF: [2, 3, 4, 5, 6, 12, 15, 16, 18, 22, 23, 24],
+  MD: [8, 7, 6, 10, 14, 16, 17, 20, 26, 28],
+  FW: [9, 10, 11, 7, 19, 27, 29, 30, 33],
+};
+
+/* Weekly tidy of who holds what. Players reach and leave the squad by more
+   routes than anyone can keep track of — transfers, free agents, loans, the
+   academy, swaps — and fixing each one separately is how a case gets missed.
+   So this runs every week and settles it in one place:
+   - anyone without a shirt number gets one (new signings arrived without);
+   - no player at another club keeps your captaincy or penalty duty, which a
+     sold player used to carry with him;
+   - your squad has at most one captain, one vice-captain and one taker. */
+function tidySquadRoles(){
+  const mine = (state.squads && state.squads[state.clubId]) || [];
+  const mineIds = new Set(mine.map(p=> p.id));
+  Object.keys(state.squads || {}).forEach(cid=>{
+    if(cid === state.clubId) return;
+    (state.squads[cid] || []).forEach(p=>{
+      if(p.isCaptain || p.isViceCaptain || p.isPenTaker){
+        p.isCaptain = false; p.isViceCaptain = false; p.isPenTaker = false;
+      }
+    });
+  });
+  ["isCaptain","isViceCaptain","isPenTaker"].forEach(flag=>{
+    let seen = false;
+    mine.forEach(p=>{ if(p[flag]){ if(seen) p[flag] = false; else seen = true; } });
+  });
+  // A captain can't also be his own vice.
+  mine.forEach(p=>{ if(p.isCaptain && p.isViceCaptain) p.isViceCaptain = false; });
+  assignSquadNumbers(state.clubId);
+}
+
+function assignSquadNumbers(clubId){
+  const squad = (state.squads && state.squads[clubId]) || [];
+  if(!squad.length) return;
+  const taken = {};
+  // Anyone who already has one keeps it, so numbers don't shuffle every week.
+  squad.forEach(p=>{
+    if(p.squadNo && !taken[p.squadNo]) taken[p.squadNo] = p.id;
+    else if(p.squadNo) p.squadNo = null;         // a clash: the later man loses it
+  });
+  // Best players first, so the recognised numbers go to the recognised men.
+  squad.slice().sort((a,b)=> (b.overall||0) - (a.overall||0)).forEach(p=>{
+    if(p.squadNo) return;
+    const prefs = SQUAD_NO_PREFERENCE[p.pos] || SQUAD_NO_PREFERENCE.MD;
+    let n = prefs.find(x=> !taken[x]);
+    if(!n){ for(let i=2;i<=99;i++){ if(!taken[i]){ n=i; break; } } }
+    if(n){ p.squadNo = n; taken[n] = p.id; }
+  });
+}
+
+function squadNumbersFree(clubId){
+  const squad = (state.squads && state.squads[clubId]) || [];
+  const taken = {}; squad.forEach(p=>{ if(p.squadNo) taken[p.squadNo] = true; });
+  const out = []; for(let i=1;i<=40;i++) if(!taken[i]) out.push(i);
+  return out;
+}
+
+function setSquadNumber(playerId, n){
+  n = parseInt(n, 10);
+  if(!n || n < 1 || n > 99) return {ok:false, reason:"Pick a number between 1 and 99."};
+  const squad = (state.squads && state.squads[state.clubId]) || [];
+  const p = squad.find(x=> x.id === playerId);
+  if(!p) return {ok:false, reason:"He isn't one of yours."};
+  const holder = squad.find(x=> x.squadNo === n && x.id !== playerId);
+  if(holder){
+    // Straight swap rather than refusing — that is what a club would do.
+    holder.squadNo = p.squadNo || null;
+  }
+  p.squadNo = n;
+  assignSquadNumbers(state.clubId);   // tidy up anyone left without one
+  saveState(true);
+  return {ok:true, swappedWith: holder || null};
+}
+
 function generateSquad(club){
   const squad = [];
   // Real players: English/Championship list for domestic clubs, EURO list abroad.
@@ -3992,6 +4076,7 @@ const P_KEYS = ["id","clubId","first","last","age","pos","isReal","nat","potenti
   "isCaptain","isViceCaptain","promisedStart","finesReceived","unsettled","disciplinary","evt","awardsExtra","sponsor","stadiumName",
   // Appended, never reordered: old saves decode positionally, so anything new
   // has to go on the end where it simply reads as absent.
+  "isPenTaker","squadNo","trainFocus","caps","intGoals","lastCapSeason","renewalRefusedAt","joinedAbs",
   // These were all being assigned and then silently dropped on every reload —
   // form and ambition since the beginning, the last three since they were added.
   "form","ambition","avatarSeed","lastRating","quitting",
@@ -4471,11 +4556,29 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "4.5.1";
+const GAME_VERSION = "5.6.4";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
 const VERSION_NOTES = {
+  "5.6.4": "The player card, fixed. Tapping one of your own academy boys or a scouted prospect showed a Buy button — which could only fail — instead of his real options, because the buy panel was being written over the top of them. The same overwrite wiped the option to scout another club's player from his card, and from the Market screen too. The Buy button also ignored the transfer window; it now waits for the window like every other deal. And releasing a player is no longer free: ending a contract early means paying him half of what is left on it, so a signing on big wages can no longer just be dropped when he disappoints. A player whose contract has run down still costs nothing to let go.",
+  "5.6.3": "More loopholes closed. Players you bought could be sold straight on for profit: other clubs bid about 15% over market for anyone you have not listed, priced in your division rather than the one you bought him from, so signing a man and waiting was free money. Nobody now bids for a player in his first half-season with you. A new coach or head of youth could be hired in the last week of the season, bank a full year's development at the rollover, and be let go in week one; staff now take half a season to have their full effect, and letting one go costs eight weeks' pay. Extending a contract with years left could cut a fading player's wages; it no longer can. And passing the captain's armband round the squad gave everyone a free morale boost — being stripped of it now stings as much as being handed it lifts.",
+  "5.6.2": "Loopholes closed. A player who turned down a new deal could be asked again straight away until the refusal happened not to happen — he now won't talk terms for eight weeks. A ticket price set at a big club followed you down the divisions at several times the local rate; it now resets and is always held to your current club's range. New signings had no shirt number until you reloaded. A thirteen-year-old could be put straight into the first team; sixteen is now the minimum. Resigning a week before the sack cost you less than being sacked, so it is now read the same way. And a sold player kept your captaincy or penalty duty at his new club.",
+  "5.6.1": "Your captain and penalty taker are now marked on the Team tab as well as the Squad tab, so you can see them while picking the side.",
+  "5.6.0": "Ticket prices. Every club charged a fixed rate set by its division with no say in it, which took away one of the few levers a manager at a small club actually has. You can now set your own price in the Commercial tab, between half and double the going rate. Charge more and you take more per head but fewer come through the turnstiles and the supporters notice; charge less and the ground fills while you bank less. The money peaks a little above the standard price, so squeezing them for everything costs you both goodwill and, in the end, income.",
+  "5.5.0": "International football. Nobody in this game had ever been capped, so a player could be the best in his division for a decade and his country never noticed. On weeks with no fixture your best players are now away with their nations, and how good you have to be depends on who you qualify for — getting into the Brazil squad is a different proposition to getting into Wales. A first cap is reported, and specially so when it is an academy player. Caps and international goals are kept on his card and shown beside his name, milestones are marked every twenty-five, and playing for your country lifts a man and tires him a little.",
+  "5.4.0": "Individual training. You can set any player to work on his pace, passing, shooting, defending or physical game from his card. It decides where his improvement lands rather than how much of it there is — the total is unchanged — so it is a shaping decision, not a free upgrade. A quick winger can be turned into a quick winger who finishes. If the thing he is working on is already as good as it can get, the work goes elsewhere instead of being wasted.",
+  "5.3.0": "Backroom staff. The club had a manager and nobody else. There is now a Staff tab under Club where you hire a first-team coach, a head physio, a head of youth development and a chief scout — each one lifting the department he runs. A coach gets more out of your players in training, a physio keeps them fit, a head of youth improves both what the academy produces and how the boys you sign come on, and a chief scout finds you better names. A good man is worth about a level and a half of facilities and never more, a poor one is worse than leaving the job empty, and they are all on the wage bill. New people come onto the market each summer.",
+  "5.2.0": "Shirt numbers. The club had none, which for a football team is an odd thing to be missing. Numbers are handed out the way a club does it — the keeper takes 1, defenders the low numbers, the middle to midfield, 9, 10 and 11 to the forwards — and the recognised shirts go to your best players. Every number is unique, a man keeps his when the squad changes around him, and you can hand any shirt to anyone from his card; if it is already taken the two players simply swap. Existing careers get their numbers the moment they load.",
+  "5.1.0": "Penalties. A match in this game had never awarded one, which is a strange thing for a football match. Roughly one game in six or seven now has a spot kick, and you can nominate who takes them from any player's card — otherwise the best finisher on the pitch steps up, and never the goalkeeper. A good finisher converts about three in four, a defender pressed into it rather less, and a man who misses takes it to heart. Scorelines are untouched: an awarded penalty accounts for a goal the side scored anyway, or explains one they did not.",
+  "5.0.0": "Career pass, and the end of the run through the whole game. You are no longer stuck at a club until you are sacked. You can resign from the boardroom, which costs you a little standing and sees the club appoint someone else straight away. Clubs with a vacancy will also approach you while you are in work if the board rate you, so you can step up rather than waiting to be dismissed — and the club you walk out on now appoints a replacement instead of being left to run itself.",
+  "4.9.0": "Finance pass. The board now warns you before the club goes under. A club below eight million in debt enters administration and is docked twelve points, and that used to arrive with no warning at all — you could drift there on the wage bill alone and lose a season without ever being told. You now get three escalating warnings on the way down, the last while there is still room to fix it, and each is said once rather than nagged every week.",
+  "4.8.0": "Match pass. You can now see who you are playing. The fixture showed two crests, home or away, and nothing else — no idea whether the side you were about to face were top of the league or bottom, or what sort of run they were on. It now shows both clubs' league position and their last five results side by side.",
+  "4.7.0": "Transfer pass. Two decisions you could never take back can now be taken back. A player sent out on loan was gone until the season ended, whatever happened at home — you can now recall him, though he comes back a little unsettled. And a deal agreed for a future window left you committed for months; you can now call it off, though the player had been told he was going and will not thank you for it. Both appear on his card.",
+  "4.6.1": "Every feature the changelog claims has been checked against the code, and the major ones are now locked in so none of them can quietly disappear in a later update.",
+  "4.6.0": "Squad pass. A player's card now shows his contract — how long he has left, what he is on, and what he would want — and you can offer him a new deal at any time instead of waiting until he is walking out the door. His final year is flagged in red. The squad list can also be sorted: by position, rating, age, form, contract or wage, so you can pull the best to the top or see at a glance who is running out.",
+  "4.5.3": "Academy pass. You can now tap any boy in your academy or on a scout's shortlist to open his card, the same as every other player in the game — and his card shows the right things: he is listed under your academy or the country he was scouted in rather than as a free agent, his ability and attributes are shown in full because he is yours, and the buttons offer professional terms, release, sign or pass instead of the transfer-market panel meant for other clubs' players.",
+  "4.5.2": "You can call a scout back. A brief set to repeat kept renewing itself with no way to stop it, so scouts were tied up for good and you could end up with none available at all. Every scout out on a trip now has Recall, a repeating brief has Stop repeating, and a player being watched has Stop watching. Youth scouts abroad can be recalled the same way.",
   "4.5.1": "Fixes a crash that broke the whole Scouting screen: the Players tab was still counting the old youth list, which no longer exists after the Academy rewrite.",
   "4.5.0": "The decision at eighteen is now a real one. A boy who reaches it appears in your action list with his rating, his ceiling and what your coaches make of him, and you either give him professional terms and a place in the first-team squad or let him go. You get the full season to make your mind up — but if you never answer him, he leaves for a club that will, which the Academy screen had been promising all along without the game actually doing it. Also trimmed two things that grew forever in the save: every scouting report ever filed, when only the last few are ever shown, and the memorial list.",
   "4.4.0": "The academy, deepened. Where you send a scout now matters: every nation carries its own standard of youth production, shown as stars, and the great ones give him both more names and better ones — though a gem can still come from anywhere. Scouts describe a boy the way a coach would, from 'unlikely to make it' up to 'potential to be special', so a shortlist reads at a glance. And your own annual intake now comes up into the academy rather than straight into the first-team squad, with an intake-day report naming the boy your coaches think most of.",
@@ -5252,6 +5355,37 @@ function getUserTier(){
   return TIERS[0].id;
 }
 
+/* A club's recent league results, newest first, as W/D/L from their point of
+   view. Used to show what sort of run the side you are about to play is on. */
+function clubRecentForm(clubId, tierId, n){
+  n = n || 5;
+  const league = state.tiers[tierId];
+  if(!league) return [];
+  const out = [];
+  league.fixtures.filter(f=> f.played && (f.home===clubId || f.away===clubId))
+    .slice(-n).forEach(f=>{
+      const home = f.home === clubId;
+      const me = home ? f.hg : f.ag, them = home ? f.ag : f.hg;
+      out.push(me > them ? "W" : me < them ? "L" : "D");
+    });
+  return out;
+}
+
+/* Where a club sits in its division right now. */
+function ordinalOr(n){
+  if(!n && n !== 0) return "\u2014";
+  const t = n % 100;
+  const suf = (t >= 11 && t <= 13) ? "th" : ["th","st","nd","rd"][n % 10] || "th";
+  return n + suf;
+}
+
+function clubLeaguePosition(clubId, tierId){
+  const table = cachedTable(tierId);
+  if(!table) return null;
+  const i = table.findIndex(r=> r.id === clubId);
+  return i === -1 ? null : i + 1;
+}
+
 function computeTable(tierId){
   const league = state.tiers[tierId];
   const rows = {};
@@ -5402,6 +5536,7 @@ function runSeasonRollover(){
   // without a decision leaves on his own — the same choice a real academy
   // is forced into by the calendar.
   ageAcademy();
+  try{ refreshStaffMarket(true); }catch(e){ reportError("STF-01", e, "staff market"); }
   // The academy intake message — the one day in the year every manager waits
   // for. Reported after ageing so the numbers shown are the new season's.
   try{
@@ -5747,8 +5882,30 @@ function rollPotential(currentOvr20, age, tierBonus){
 }
 
 // Runs once per player per season, after ageing.
+/* What a player is working on. Training focus decides where his improvement
+   lands rather than how much of it there is, so choosing one is a shaping
+   decision and not a free upgrade. */
+const TRAIN_FOCUSES = [
+  {id:"pace",      label:"Pace"},
+  {id:"passing",   label:"Passing"},
+  {id:"shooting",  label:"Shooting"},
+  {id:"defending", label:"Defending"},
+  {id:"physical",  label:"Physical"},
+];
+function setTrainFocus(playerId, focusId){
+  const sq = (state.squads && state.squads[state.clubId]) || [];
+  const p = sq.find(x=> x.id === playerId);
+  if(!p) return {ok:false, reason:"He isn't one of yours."};
+  if(focusId && !TRAIN_FOCUSES.some(f=> f.id === focusId)) return {ok:false, reason:"He can't work on that."};
+  p.trainFocus = focusId || null;
+  saveState(true);
+  return {ok:true, player:p};
+}
+
 function developPlayer(p, club){
-  const trainingLevel = club && club.id===state.clubId ? club.facilities.training : 2;
+  const trainingLevel = club && club.id===state.clubId
+    ? club.facilities.training + (typeof staffBonus==="function" ? staffBonus("coach") : 0)
+    : 2;
   const formAvg = formAverage(p);
   const formBonus = formAvg===null ? 0 : (formAvg-6.8)*0.35; // playing well accelerates growth
   const pot = p.potential || p.overall;
@@ -5779,8 +5936,18 @@ function developPlayer(p, club){
   // wider spread so a genuine prospect reaches his ceiling by his mid-20s rather
   // than retiring 4 points short of it.
   const spread = (steps > 0 && p.age <= 25) ? 3 : 2;
+  // A player working on one part of his game. It does not make him improve
+  // faster overall — the total is the same — it decides where the improvement
+  // lands, so you can turn a quick winger into a quick winger who can finish.
+  const focus = (club && club.id === state.clubId && p.trainFocus && keys.indexOf(p.trainFocus) !== -1)
+    ? p.trainFocus : null;
   for(let i=0; i<Math.abs(steps)*spread; i++){
-    const k = pick(keys);
+    // Rather under half the work goes into what he is working on and the rest
+    // spreads as usual, so a focus shapes a player over a season or two rather
+    // than transforming him in one. If the attribute is already maxed the work
+    // goes elsewhere instead of being thrown away.
+    const useFocus = focus && steps > 0 && p[focus] < 20 && Math.random() < 0.45;
+    const k = useFocus ? focus : pick(keys);
     // Pace is the first thing to go and the last to come back for older players.
     if(steps<0 && p.age>30 && Math.random()<0.4){ p.pace = clamp(p.pace-1,1,20); continue; }
     p[k] = clamp(p[k] + (steps>0?1:-1), 1, 20);
@@ -6145,6 +6312,51 @@ function clubPullFactor(club){
 }
 
 // Returns {attendance, revenue}. `competition` is "league" or a cup name.
+/* =========================================================================
+   TICKET PRICES — what you charge at the gate. Every club had a fixed price
+   set by its division and no say in it, which took away one of the few levers
+   a manager at a small club actually has.
+
+   Charge more and you take more per head, but fewer people come and the
+   supporters notice; charge less and the ground fills but you bank less. The
+   sweet spot moves with how well you are doing, which is the point.
+   ========================================================================= */
+function baseTicketPrice(club){ return (TICKET_PRICE && TICKET_PRICE[club.tier]) || 15; }
+
+function ticketPrice(club){
+  if(club.id !== state.clubId) return baseTicketPrice(club);
+  const base = baseTicketPrice(club);
+  const set = state.ticketPrice;
+  if(!(typeof set === "number" && set > 0)) return base;
+  // Held to this club's range whenever it is read. A price set at a bigger
+  // club would otherwise follow you down the divisions at several times the
+  // local going rate.
+  return clamp(set, Math.max(3, Math.round(base*0.5)), Math.round(base*2));
+}
+
+/* How much a price changes the turnout. People will wear a small rise; a big
+   one empties seats, and cutting prices brings some back but never doubles a
+   crowd, because a club's support has a natural size. */
+function ticketDemandFactor(club){
+  const base = baseTicketPrice(club);
+  const set = ticketPrice(club);
+  if(base <= 0) return 1;
+  const ratio = set / base;
+  // Tuned so the money has one clear peak, a little above the standard price,
+  // and gouging genuinely costs you. A shallower curve with a high floor meant
+  // charging the maximum was always best, which is no decision at all.
+  return clamp(1 - (ratio - 1) * 0.75, 0.30, 1.18);
+}
+
+function setTicketPrice(v){
+  const club = clubById(state.clubId);
+  const base = baseTicketPrice(club);
+  const price = clamp(Math.round(v), Math.max(3, Math.round(base*0.5)), Math.round(base*2));
+  state.ticketPrice = price;
+  saveState(true);
+  return {ok:true, price};
+}
+
 function computeAttendance(homeClub, awayClub, competition){
   const cap = homeClub.capacity;
   let fill;
@@ -6156,9 +6368,11 @@ function computeAttendance(homeClub, awayClub, competition){
     // A far bigger visitor in a cup tie is the classic sell-out: the whole town goes.
     fill = 0.55 + clubPullFactor(awayClub)*0.3 + Math.max(0,gap)*0.75 + rnd(-0.06,0.1);
   }
+  // What you charge moves the turnout.
+  fill = fill * ticketDemandFactor(homeClub);
   fill = clamp(fill, 0.22, 1);
   const attendance = Math.round(cap * fill);
-  const price = TICKET_PRICE[homeClub.tier] || 15;
+  const price = ticketPrice(homeClub);
   // Cup ties carry a ticket premium, and gate receipts in the domestic cups are
   // traditionally shared, so the home club banks the lion's share of a big day.
   const mult = competition === "league" ? 1 : 1.35;
@@ -6606,6 +6820,31 @@ function sackUser(reason, headline){
   return {sacked:true, club};
 }
 
+/* Walking away. You could be sacked but never leave — once you took a job you
+   were tied to it until the board moved you on, which meant no stepping up to
+   a bigger club and no getting out of a doomed one. Resigning costs you a
+   little standing, as it should: clubs remember a manager who jumped. */
+function resignPost(){
+  if(!state.manager || state.manager.unemployed) return {ok:false, reason:"You aren't in a job."};
+  const club = clubById(state.clubId);
+  state.manager.unemployed = true;
+  state.manager.weeksUnemployed = 0;
+  const spell = state.manager.history[state.manager.history.length-1];
+  if(spell && spell.toSeason === null) spell.toSeason = state.season;
+  // Walking out while the board is losing patience is read the same way as a
+  // sacking — otherwise resigning a week early was a way to dodge the cost.
+  const underPressure = (state.sackPressure || 0) >= 2 || state.sackWarned
+    || (typeof boardConfidence === "function" && boardConfidence() < 35);
+  state.manager.reputation = clamp(state.manager.reputation - (underPressure ? 2 : 1), 1, 20);
+  state.sackPressure = 0;
+  state.sackWarned = false;
+  club.manager = makeAIManager(club);
+  pushNews("You have resigned",
+    `You have stepped down as manager of ${club.name}. ${club.manager.name} takes over.`, "board");
+  saveState(true);
+  return {ok:true, club};
+}
+
 /* ---- Job offers ---- */
 // Clubs that have just sacked their own manager, or that are drifting, look at
 // the available names. Your reputation decides which jobs are realistic.
@@ -6627,7 +6866,12 @@ function generateManagerVacancies(){
       club.vacantSince = state.week;
       // Would they consider you?
       const clubRep = clamp(Math.round(leagueRank(club)/6000), 1, 20);
-      if(state.manager.unemployed && clubRep <= rep + 3 && clubRep >= rep - 6 && Math.random() < 0.5){
+      // A club with a vacancy looks at whoever is doing well — including a
+      // manager already in work. Being in a job used to make you invisible,
+      // so there was no way to move up short of being sacked first.
+      const openToApproach = state.manager.unemployed
+        || (boardConfidence() >= 60 && clubRep >= rep - 1 && state.week > 8);
+      if(openToApproach && clubRep <= rep + 3 && clubRep >= rep - 6 && Math.random() < (state.manager.unemployed ? 0.5 : 0.10)){
         offers.push(club);
       }
     }
@@ -6652,7 +6896,8 @@ function generateManagerVacancies(){
     if(state.jobOffers.some(o=>o.clubId===c.id)) return;
     state.jobOffers.push({clubId:c.id, week:state.week, season:state.season});
     pushNews("Job offer",
-      `${c.name} (${leagueDisplayName(c.tier)}) have approached you about their vacant manager's post.`, "board");
+      `${c.name} (${leagueDisplayName(c.tier)}) have approached you about their vacant manager's post.` +
+      (state.manager.unemployed ? "" : ` Accepting would mean leaving ${(clubById(state.clubId)||{}).name}.`), "board");
   });
   return offers;
 }
@@ -6662,8 +6907,20 @@ function acceptJob(clubId){
   if(!club || club.hidden) return false;
   const prev = state.manager.history[state.manager.history.length-1];
   if(prev && prev.toSeason === null) prev.toSeason = state.season;
+  // Leaving a job for another one. The club you walk out on has to appoint
+  // somebody — being sacked already did this, but taking a better offer did
+  // not, which would have left your old club running itself.
+  const leaving = (!state.manager.unemployed && state.clubId && state.clubId !== clubId)
+    ? clubById(state.clubId) : null;
+  if(leaving){
+    leaving.manager = makeAIManager(leaving);
+    pushNews("You leave for " + club.name,
+      `You have left ${leaving.name} to take charge of ${club.name}. ${leaving.manager.name} replaces you.`, "board");
+  }
   state.clubId = clubId;
   state.manager.clubId = clubId;
+  // A new club starts on its own going rate, not whatever you charged before.
+  state.ticketPrice = null;
   state.manager.unemployed = false;
   state.manager.weeksUnemployed = 0;
   state.manager.history.push({clubId, fromSeason: state.season, toSeason: null});
@@ -8089,6 +8346,12 @@ function generateIncomingOffers(){
       // Must at least push the current XI, allowing a little for squad depth.
       if(ratingOf(p) < weakest - 4) return;
     }
+    // A club does not bid for a man who has just joined you. Without this,
+    // anyone you signed could be sold straight on at a premium — bids run 15%
+    // over market on average and are priced in your division, not the one you
+    // bought him from, so buying down-league and waiting was free money.
+    const nowAbs = state.season * CALENDAR_WEEKS + state.week;
+    if(p.joinedAbs && nowAbs - p.joinedAbs < 20) return;
     const market = playerAskingPrice(p, myClub.tier);
     // Bids vary: some lowball, some over the odds if they're desperate.
     const fee = Math.max(1000, Math.round(market * rnd(p.listed ? 0.72 : 0.95, p.listed ? 1.05 : 1.35)));
@@ -8296,6 +8559,48 @@ function processOutgoingLoans(){
     sent.push({p, dest});
   });
   return sent;
+}
+
+/* Calling a loan short. A player sent out for the season was gone until it
+   ended, whatever happened at home — an injury crisis in his position left you
+   with no way to bring back your own man. Real loans are recalled all the time.
+   He comes back a little unsettled at having been pulled out mid-spell. */
+function recallLoanedPlayer(playerId){
+  const squad = state.squads[state.clubId] || [];
+  const p = squad.find(x=> x.id === playerId);
+  if(!p) return {ok:false, reason:"He isn't one of yours."};
+  if(!p.loanedOutTo) return {ok:false, reason:"He isn't out on loan."};
+  const dest = clubById(p.loanedOutTo);
+  p.loanedOutTo = null;
+  p.loanListed = false;
+  p.morale = clamp((p.morale||12) - 1, 1, 20);
+  pushNews("Loan cut short",
+    `${fullName(p)} has been recalled from ${dest?dest.name:"his loan"} and is available again.`, "transfer");
+  saveState(true);
+  return {ok:true, player:p, from:dest};
+}
+
+/* Calling off a deal agreed for a future window. You could agree to sell a man
+   outside the window and then be stuck with the decision for months, however
+   the season turned. Backing out costs you: the buying club is not pleased and
+   the player knows he was promised a move. */
+function cancelAgreedDeal(playerId){
+  state.agreedDeals = state.agreedDeals || [];
+  const idx = state.agreedDeals.findIndex(d=> d.playerId === playerId);
+  if(idx === -1) return {ok:false, reason:"There's no agreed deal for him."};
+  const deal = state.agreedDeals[idx];
+  const buyer = clubById(deal.toClub);
+  state.agreedDeals.splice(idx, 1);
+  const p = (state.squads[state.clubId]||[]).find(x=> x.id === playerId);
+  if(p){
+    p.agreedToLeave = false;
+    p.morale = clamp((p.morale||12) - 3, 1, 20);   // he was told he was going
+  }
+  pushNews("Deal called off",
+    `${p?fullName(p):"The player"} will not be joining ${buyer?buyer.name:"them"} after all. ` +
+    `${p?fullName(p):"He"} had been told the move was agreed.`, "transfer");
+  saveState(true);
+  return {ok:true, player:p, buyer:buyer};
 }
 
 // Runs weekly so a loan listing is acted on within a week or two, rather than
@@ -9157,11 +9462,19 @@ function captaincyRating(p){
 
 function setCaptain(playerId){
   const sq = state.squads[state.clubId] || [];
+  const previous = sq.find(p=> p.isCaptain);
+  if(previous && previous.id === playerId) return;
   sq.forEach(p=>{ p.isCaptain = false; p.isViceCaptain = false; });
   const cap = sq.find(p=>p.id===playerId);
   if(cap){
     cap.isCaptain = true;
-    cap.morale = clamp(cap.morale + 4, 1, 20);
+    // Being handed the armband lifts a man; having it taken off you stings.
+    // Passing it round the squad used to give each player +4 for free.
+    const nowAbs = state.season * CALENDAR_WEEKS + state.week;
+    const settled = !state.captainSinceAbs || (nowAbs - state.captainSinceAbs) >= 10;
+    cap.morale = clamp(cap.morale + (settled ? 4 : 1), 1, 20);
+    if(previous && previous.id !== playerId) previous.morale = clamp((previous.morale||12) - 3, 1, 20);
+    state.captainSinceAbs = nowAbs;
     // Vice-captain: next best leader.
     const vice = sq.filter(p=>p.id!==playerId).sort((a,b)=>captaincyRating(b)-captaincyRating(a))[0];
     if(vice) vice.isViceCaptain = true;
@@ -10380,6 +10693,7 @@ function signFreeAgent(player){
   player.renewalHandled = null;
   player.morale = Math.max(player.morale || 12, 14);   // pleased to be here
   if(!state.squads[club.id].some(p=> p === player || p.id === player.id)){
+    player.joinedAbs = state.season * CALENDAR_WEEKS + state.week;   // no instant flip
     state.squads[club.id].push(player);
   }
   pushNews("Free transfer",
@@ -10661,6 +10975,42 @@ function selectStartingXI(squad){
   return xi;
 }
 
+/* Who takes a penalty. The man you nominated if he is on the pitch, otherwise
+   whoever is the most convincing finisher out there — which is what a captain
+   would decide on the day anyway. */
+function penaltyTakerFor(squad){
+  const xi = selectStartingXI(squad).filter(p=> p.pos !== "GK");
+  if(!xi.length) return null;
+  const chosen = xi.find(p=> p.isPenTaker);
+  if(chosen) return chosen;
+  return xi.slice().sort((a,b)=> (b.shooting||0) - (a.shooting||0))[0];
+}
+
+/* How likely he is to score from twelve yards. A good finisher converts about
+   four in five; a defender pressed into it is a good deal less certain. */
+function penaltyConversion(p){
+  if(!p) return 0.75;
+  return clamp(0.58 + ((p.shooting||10) - 10) * 0.022, 0.52, 0.92);
+}
+
+function setPenaltyTaker(playerId){
+  const sq = state.squads[state.clubId] || [];
+  const p = sq.find(x=> x.id === playerId);
+  if(!p) return {ok:false, reason:"He isn't one of yours."};
+  sq.forEach(x=>{ x.isPenTaker = false; });
+  p.isPenTaker = true;
+  saveState(true);
+  return {ok:true, player:p};
+}
+function clearPenaltyTaker(){
+  (state.squads[state.clubId] || []).forEach(x=>{ x.isPenTaker = false; });
+  saveState(true);
+  return {ok:true};
+}
+function penaltyTakerOf(clubId){
+  return (state.squads[clubId] || []).find(p=> p.isPenTaker) || null;
+}
+
 function buildMatchDetail(homeId, awayId, hg, ag){
   const homeSquad = state.squads[homeId], awaySquad = state.squads[awayId];
   const hr = teamRatings(homeSquad), ar = teamRatings(awaySquad);
@@ -10706,7 +11056,9 @@ function buildMatchDetail(homeId, awayId, hg, ag){
   // medical centre level.
   const injuries = [];
   [homeId, awayId].forEach(clubId=>{
-    const medical = clubId===state.clubId ? clubById(clubId).facilities.medical : 2;
+    const medical = clubId===state.clubId
+        ? clubById(clubId).facilities.medical + (typeof staffBonus==="function" ? staffBonus("physio") : 0)
+        : 2;
     selectStartingXI(state.squads[clubId]).forEach(p=>{
       const prone = p.injuryProne ? 1.6 : 1;
       if(Math.random() < 0.014*prone/(1+(medical-1)*0.2)){
@@ -10716,7 +11068,29 @@ function buildMatchDetail(homeId, awayId, hg, ag){
     });
   });
 
-  return {possession, homeShots, awayShots, homeScorers, awayScorers, ratings, motmId, motmBest, injuries};
+  /* Penalties. A match in this game never awarded one, which is a strange
+     thing for a football match. The scoreline is already settled before this
+     runs, so nothing here changes a result: an awarded penalty either accounts
+     for a goal the side had scored anyway — credited to the man who takes them
+     rather than a weighted guess — or it is one that was missed, which is why
+     the score is what it is. */
+  const penalties = [];
+  [[homeId, homeSquad, homeScorers, hg], [awayId, awaySquad, awayScorers, ag]].forEach(([cid, squad, scorers, goals])=>{
+    const taker = penaltyTakerFor(squad);
+    if(!taker) return;
+    // Roughly one match in six or seven has a spot kick in it.
+    if(Math.random() > 0.15) return;
+    const scored = Math.random() < penaltyConversion(taker);
+    if(scored && goals > 0){
+      // One of their goals was the penalty, and he took it.
+      scorers[rndInt(0, scorers.length)] = taker;
+      penalties.push({clubId:cid, playerId:taker.id, scored:true});
+    } else if(!scored){
+      penalties.push({clubId:cid, playerId:taker.id, scored:false});
+    }
+  });
+
+  return {possession, homeShots, awayShots, homeScorers, awayScorers, ratings, motmId, motmBest, injuries, penalties};
 }
 
 // Cheap per-match stat recording for the ~10,000 AI fixtures a season. No
@@ -11006,7 +11380,9 @@ function runYouthRotation(){
     });
 
     // Youth intake.
-    const youthLevel = isUser ? club.facilities.youth : 2;
+    const youthLevel = isUser
+      ? club.facilities.youth + (typeof staffBonus==="function" ? staffBonus("headOfYouth") : 0)
+      : 2;
     const intakeCount = clamp(1+youthLevel, 2, 6);
     const baseline = (TIER_YOUTH_BASE[club.tier] || 7) + youthLevel;
     for(let i=0;i<intakeCount;i++){
@@ -11122,15 +11498,111 @@ function runYouthRotation(){
 
 // Kept as the public name used across the UI, now backed by real contracts.
 function weeklyWageBill(clubId){
-  if(typeof wageBill === "function") return wageBill(clubId);
   const club = clubById(clubId);
-  return state.squads[clubId].reduce((s,p)=>s+playerWage(p, club.tier), 0);
+  const players = (typeof wageBill === "function")
+    ? wageBill(clubId)
+    : state.squads[clubId].reduce((s,p)=>s+playerWage(p, club.tier), 0);
+  // Your backroom staff are on the payroll too — hiring four good people has
+  // to show up in the wage bill, or they would be free.
+  const staff = (clubId === state.clubId && typeof staffWageBill === "function") ? staffWageBill() : 0;
+  return players + staff;
 }
 
 // leagueResult: {played, isHome, won, drawn} for the user's league fixture this week,
 // or null on a week they had no league fixture (bye weeks, or a tier sitting out after
 // its own season finished early). Returns the breakdown so the UI can show it, not just
 // silently apply it to balance.
+/* =========================================================================
+   INTERNATIONAL FOOTBALL — nobody in this game was ever capped, which meant a
+   player could be the best in the division for a decade and his country never
+   noticed. A boy you found at fourteen going on to play for his country is
+   the payoff a save is built towards, so it is worth the game saying so.
+
+   Call-ups happen on blank weeks, which is when internationals are played.
+   A cap is an honour, not a chore: it lifts a man and tires him a little.
+   ========================================================================= */
+
+/* How strong a nation is decides how good you must be to get in. Playing for
+   Brazil is a different proposition to playing for Wales. */
+const NATION_CAP_BAR = {
+  Brazilian:16.5, French:16.5, Spanish:16.2, German:16.0, Argentine:16.0,
+  English:15.8, Portuguese:15.5, Italian:15.5, Dutch:15.0, Belgian:14.8,
+  Welsh:12.8, Scottish:13.0, Irish:13.0, "Northern Irish":12.2,
+};
+function capBarFor(nat){ return NATION_CAP_BAR[nat] || 13.5; }
+
+/* Is he in his country's thinking this week? */
+function deservesCallUp(p){
+  if(!p || p.injuryWeeks > 0 || p.suspensionWeeks > 0) return false;
+  if(p.age < 16) return false;
+  const bar = capBarFor(p.nat);
+  // A young player of real promise gets looked at earlier than his rating
+  // alone would suggest, the way an emerging talent does.
+  const youthLift = p.age <= 21 ? 0.8 : 0;
+  return (ratingOf(p) + youthLift) >= bar;
+}
+
+/* Runs on a week with no fixture. Anyone good enough is away with his country. */
+function runInternationalBreak(){
+  const squad = (state.squads && state.squads[state.clubId]) || [];
+  const capped = [];
+  squad.forEach(p=>{
+    if(p.loanedOutTo) return;
+    if(!deservesCallUp(p)) return;
+    if(p.lastCapSeason === state.season && Math.random() < 0.45) return;  // not every break
+    const first = !p.caps;
+    p.caps = (p.caps || 0) + 1;
+    p.lastCapSeason = state.season;
+    // Playing for your country is a lift, and a tiring one.
+    p.morale = clamp((p.morale || 12) + (first ? 3 : 1), 1, 20);
+    if(typeof p.fatigue === "number") p.fatigue = clamp(p.fatigue + 6, 0, 100);
+    // Forwards and midfielders occasionally get on the scoresheet.
+    if((p.pos === "FW" || p.pos === "MD") && Math.random() < 0.18) p.intGoals = (p.intGoals || 0) + 1;
+    capped.push({player:p, first});
+  });
+
+  capped.filter(c=> c.first).forEach(c=>{
+    pushNews("First cap",
+      `${fullName(c.player)} has been capped by ${c.player.nat === "English" ? "England" : c.player.nat}` +
+      `${c.player.isYouth ? " — an academy player winning his first cap" : ""}.`, "squad");
+  });
+  const milestones = capped.filter(c=> !c.first && c.player.caps % 25 === 0);
+  milestones.forEach(c=>{
+    pushNews(`${c.player.caps} caps`,
+      `${fullName(c.player)} has won his ${c.player.caps}th cap for his country.`, "squad");
+  });
+  if(capped.length) saveState(true);
+  return capped;
+}
+
+/* The board says something before it is too late. A club slides into
+   administration below -8m and is docked twelve points, and that used to
+   arrive with no warning whatever — you could drift there on the wage bill
+   alone and lose a season to it without ever being told. Each step is said
+   once, and only again if you climb back out and fall in a second time.
+   Kept as its own function so it can be tested against the real code. */
+function checkFinanceWarnings(club, wages){
+  const steps = [
+    {at: -1e6,   key:"concern", title:"The board are watching the finances",
+     body:`The club is ${fmtMoney(Math.abs(club.balance))} in the red. Nobody is panicking yet, but the board would like to see it turned around.`},
+    {at: -4e6,   key:"serious", title:"The board are worried about the finances",
+     body:`Losses are mounting — the club is ${fmtMoney(Math.abs(club.balance))} down. The wage bill is ${fmtMoney(Math.abs(wages))} a week. Sell someone or cut the wages.`},
+    {at: -6.5e6, key:"final",   title:"The board's final warning on finances",
+     body:`At ${fmtMoney(Math.abs(club.balance))} in debt the club is close to administration, which would mean a points deduction. This has to be fixed now.`},
+  ];
+  state.financeWarnings = state.financeWarnings || {};
+  const fired = [];
+  steps.forEach(st=>{
+    if(club.balance <= st.at && !state.financeWarnings[st.key]){
+      state.financeWarnings[st.key] = true;
+      pushNews(st.title, st.body, "board");
+      fired.push(st.key);
+    }
+    if(club.balance > st.at + 1e6) state.financeWarnings[st.key] = false;
+  });
+  return fired;
+}
+
 function applyWeeklyFinance(leagueResult){
   const club = clubById(state.clubId);
   const tier = club.tier;
@@ -11155,14 +11627,21 @@ function applyWeeklyFinance(leagueResult){
   const tv = Math.round(TIER_TV_BASE[tier] * posMult);
 
   const total = wages+matchday+winBonus+sponsorship+adverts+tv;
+  const before = club.balance;
   club.balance += total;
   state.lastFinance = {wages,matchday,winBonus,sponsorship,adverts,tv,total,week:state.week};
+
+  try{ checkFinanceWarnings(club, wages); }catch(e){ reportError("FIN-03", e, "finance warnings"); }
+
   return state.lastFinance;
 }
 
 function buyPlayer(player, overridePrice){
   const buyer = clubById(state.clubId);
   const seller = clubById(player.clubId);
+  // There has to be a real club selling him. An academy boy or a scouted
+  // prospect has none, and pressing buy on one used to throw here.
+  if(!seller) return {ok:false, reason:"He isn't at a club you can buy from."};
   const price = overridePrice !== undefined ? overridePrice : playerAskingPrice(player, seller.tier);
   if(buyer.balance < price) return {ok:false, reason:"Not enough budget."};
   if(state.squads[buyer.id].length >= SQUAD_MAX) return {ok:false, reason:"Your squad is full (30 maximum)."};
@@ -11183,6 +11662,7 @@ function buyPlayer(player, overridePrice){
   player.renewalHandled = null;
   player.agreedToLeave = false;
   player.loanedFrom = null;
+  player.joinedAbs = state.season * CALENDAR_WEEKS + state.week;
   state.squads[buyer.id].push(player);
   pushNews("Transfer completed", `${fullName(player)} joins from ${seller.name} for ${fmtMoney(price)}.`, "transfer");
   checkAchievements({signedPlayer:true, signedFee:price});
@@ -11202,10 +11682,29 @@ function sellPlayer(player){
   return price;
 }
 
+/* What it costs to cancel a man's contract. Releasing used to be free, which
+   made every contract meaningless: sign a player on big wages, and if he
+   flopped his wages simply vanished the day you let him go. A club that ends
+   a contract early pays him off — half of what is left on it is the usual
+   settlement. A player whose deal has run down costs next to nothing. */
+function releaseCost(player){
+  const yrs = Math.max(0, player.contractYears === undefined ? 1 : player.contractYears);
+  return Math.round(yrs * CALENDAR_WEEKS * (player.wage || 0) * 0.5);
+}
+
 function releasePlayer(player){
+  const club = clubById(player.clubId);
+  const cost = releaseCost(player);
+  if(club && cost > 0){
+    if(club.balance < cost) return {ok:false, reason:`Paying up his contract would cost ${fmtMoney(cost)} — more than the club has.`};
+    club.balance -= cost;
+  }
   state.squads[player.clubId] = state.squads[player.clubId].filter(p=>p.id!==player.id);
   releaseToFreeAgents(player);   // he joins the free agent pool, as in real football
+  if(cost > 0) pushNews("Contract settled",
+    `${fullName(player)} has left after the club paid ${fmtMoney(cost)} to end his contract early.`, "board");
   saveState();
+  return {ok:true, cost};
 }
 
 /* =========================================================================
@@ -12123,7 +12622,7 @@ const ERROR_AREAS = {
   "SEA-01":"End-of-season rollover", "SEA-02":"Promotion and relegation",
   "SEA-03":"Youth intake", "SEA-04":"Awards",
   "TRF-01":"Making an offer", "TRF-02":"Loan move", "TRF-03":"Contract renewal",
-  "FIN-01":"Weekly finances", "FIN-02":"Wage budget",
+  "FIN-01":"Weekly finances", "FIN-02":"Wage budget", "FIN-03":"Finance warnings",
   "SAV-01":"Saving your career", "SAV-02":"Loading your career",
   "DAT-01":"Player data",
   "SYS-01":"Uncaught script error", "SYS-02":"Background task failed",
@@ -12131,8 +12630,8 @@ const ERROR_AREAS = {
   "SAV-03":"Save migration", "SAV-04":"Career export", "SAV-05":"Career import",
   "DAT-02":"Career self check", "SCT-01":"Scouting", "TRN-01":"Position training", "REC-01":"Club records", "SMK-01":"Screen smoke test", "ACT-01":"Action list", "ACT-02":"Action decision",
   "BOOT-04":"Loading the active slot", "SEL-01":"Team selection",
-  "SQD-01":"Squad ledger — unexplained departure", "SQD-02":"Squad ledger",
-  "YTH-01":"Youth scouting", "YTH-02":"Youth intake report",
+  "SQD-01":"Squad ledger — unexplained departure", "SQD-02":"Squad ledger", "SQD-03":"Squad roles",
+  "YTH-01":"Youth scouting", "YTH-02":"Youth intake report", "STF-01":"Backroom staff", "INT-01":"International break",
   "SCT-02":"Club scouting network", "SCT-03":"Seasonal club scouting",
   "SIM-05":"Penalty shootout", "TRF-10":"Settling agreed deals",
   "TRF-14":"Transfer market maintenance",
@@ -12671,7 +13170,31 @@ function renderDashboard(){
           <div class="side">${crestSVG(opp,50)}<div class="name">${opp.name}</div></div>
         </div>
         <div style="text-align:center; color:var(--text-dim); font-size:11.5px; margin-top:8px;">${isHome?"Home":"Away"} · ${tierName(userTier)}</div>
-
+        ${(()=>{
+          // Who you are actually playing. The fixture used to show two crests
+          // and nothing else — no idea whether they were top of the league or
+          // bottom, or what sort of run they were on.
+          try{
+            const dot = r=> r==="W" ? "var(--good)" : r==="L" ? "var(--bad)" : "var(--text-dim)";
+            const myPos  = clubLeaguePosition(club.id, userTier);
+            const oppPos = clubLeaguePosition(opp.id, userTier);
+            const myForm  = clubRecentForm(club.id, userTier);
+            const oppForm = clubRecentForm(opp.id, userTier);
+            const runHTML = f=> f.length
+              ? f.map(r=>`<span style="display:inline-block; width:15px; height:15px; line-height:15px; border-radius:4px; font-size:9.5px; font-weight:700; color:#fff; background:${dot(r)}; margin-right:2px; text-align:center;">${r}</span>`).join("")
+              : `<span style="color:var(--text-dim); font-size:11px;">no games yet</span>`;
+            const side = (pos, form) => `
+              <div style="flex:1; min-width:0;">
+                <div style="font-size:11px; color:var(--text-dim); margin-bottom:3px;">${pos?ordinalOr(pos):"—"}</div>
+                <div>${runHTML(form)}</div>
+              </div>`;
+            return `<div style="display:flex; gap:10px; align-items:flex-start; margin-top:12px; padding-top:11px; border-top:1px solid var(--hairline); text-align:center;">
+                ${side(myPos, myForm)}
+                <div style="width:1px; background:var(--hairline); align-self:stretch;"></div>
+                ${side(oppPos, oppForm)}
+              </div>`;
+          }catch(e){ return ""; }
+        })()}
       </div>`;
   } else {
     heroHTML = `
@@ -12967,7 +13490,7 @@ function renderPitch(host){
     const fit = wanted ? bestFit(p, wanted) : null;
     const f = formAverage(p);
     row.innerHTML = `<span class="pos-tag${fit!==null && fit>=0.985?" fits":fit!==null && fit<0.95?" unfit":""}">${positionsOf(p).join("/")}</span>
-      <span class="pname">${flagFor(p.nat)} ${fullName(p)}<span class="mood" title="Morale">${moodIcon(p)}</span>${(()=>{const a=playerAlert(p); return a?`<span class="mood-alert" title="${a.why}">${a.icon}</span>`:"";})()} ${statusTagHTML(p)}<br>
+      <span class="pname">${p.squadNo?`<span style="display:inline-block; min-width:20px; color:var(--text-dim); font-variant-numeric:tabular-nums; font-weight:700;">${p.squadNo}</span> `:""}${flagFor(p.nat)} ${fullName(p)}${p.isCaptain?'<span class="mkt-badge cap" style="margin-left:4px;">C</span>':p.isViceCaptain?'<span class="mkt-badge vice" style="margin-left:4px;">VC</span>':''}${p.isPenTaker?'<span class="mkt-badge cap" style="margin-left:3px;" title="Takes penalties">PEN</span>':''}<span class="mood" title="Morale">${moodIcon(p)}</span>${(()=>{const a=playerAlert(p); return a?`<span class="mood-alert" title="${a.why}">${a.icon}</span>`:"";})()} ${statusTagHTML(p)}<br>
         <span style="font-size:11px; color:var(--text-dim);">age ${p.age}${f!==null?" · form "+f.toFixed(1):""}${p.isYouth?" · academy":""}${
           out ? " · <b style='color:var(--bad);'>unavailable</b>"
               : (fit!==null && fit<1 ? ` · <span style="color:var(--warn,#E8B94E);">out of position</span>` : "")}</span></span>
@@ -13081,7 +13604,7 @@ function renderLineup(host){
     const f = formAverage(p);
     row.innerHTML = `${avatarSVG(p,28)}
       <span class="pos-tag">${positionsOf(p).join("/")}</span>
-      <span class="pname">${flagFor(p.nat)} ${fullName(p)}<span class="mood" title="Morale">${moodIcon(p)}</span>${(()=>{const a=playerAlert(p); return a?`<span class="mood-alert" title="${a.why}">${a.icon}</span>`:"";})()} ${statusTagHTML(p)}<br>
+      <span class="pname">${p.squadNo?`<span style="display:inline-block; min-width:20px; color:var(--text-dim); font-variant-numeric:tabular-nums; font-weight:700;">${p.squadNo}</span> `:""}${flagFor(p.nat)} ${fullName(p)}${p.isCaptain?'<span class="mkt-badge cap" style="margin-left:4px;">C</span>':p.isViceCaptain?'<span class="mkt-badge vice" style="margin-left:4px;">VC</span>':''}${p.isPenTaker?'<span class="mkt-badge cap" style="margin-left:3px;" title="Takes penalties">PEN</span>':''}<span class="mood" title="Morale">${moodIcon(p)}</span>${(()=>{const a=playerAlert(p); return a?`<span class="mood-alert" title="${a.why}">${a.icon}</span>`:"";})()} ${statusTagHTML(p)}<br>
         <span style="font-size:11px; color:var(--text-dim);">${p.apps} apps · ${p.goals} gls${f!==null?" · form "+f.toFixed(1):""}</span></span>
       <span class="ovr-pair"><span class="ovr num">${ratingOf(p)}</span><span class="pot num">${potentialOf(p)}</span></span>
       <button class="lineup-btn">${inXI?"−":"+"}</button>`;
@@ -13167,7 +13690,7 @@ function renderAcademy(host){
       : g === 1 ? `<span style="color:var(--good);">▲ improving</span>`
       : `<span style="color:var(--text-dim);">— stalled</span>`;
     const yrs = p.yearsInAcademy ? `${p.yearsInAcademy} yr${p.yearsInAcademy===1?"":"s"}` : "new";
-    return `<div class="row" style="${isDue?'border-left:3px solid var(--bad);':''}">
+    return `<div class="row" style="${isDue?'border-left:3px solid var(--bad);':''}" data-open="${p.id}">
         <div style="flex:1; min-width:0;">
           <div style="font-weight:650; font-size:14px;">
             ${flagFor(p.nat)} ${fullName(p)}
@@ -13183,7 +13706,7 @@ function renderAcademy(host){
         </div>
       </div>
       <div style="display:flex; gap:8px; margin:-2px 0 12px;">
-        <button class="btn-secondary" style="flex:1; padding:8px; font-size:12.5px;" data-promote="${p.id}">${isDue?"Professional terms":"Promote to first team"}</button>
+        <button class="btn-secondary" style="flex:1; padding:8px; font-size:12.5px;" data-promote="${p.id}"${p.age<16?" disabled":""}>${p.age<16?`First team from 16`:(isDue?"Professional terms":"Promote to first team")}</button>
         <button class="btn-secondary" style="flex:1; padding:8px; font-size:12.5px; opacity:.75;" data-release="${p.id}">Release</button>
       </div>`;
   }).join("");
@@ -13195,6 +13718,11 @@ function renderAcademy(host){
        </span></div>`
     : "") + `<div class="list">${rows}</div>`;
 
+  // Tapping a boy opens his card, exactly as tapping anyone in the squad does.
+  body.querySelectorAll("[data-open]").forEach(r=> r.onclick = ()=>{
+    const pl = academyPlayers().find(x=> x.id === r.dataset.open);
+    if(pl){ playClickSound(); openPlayerModal(pl); }
+  });
   body.querySelectorAll("[data-promote]").forEach(b=> b.onclick = ()=>{
     const r = promoteFromAcademy(b.dataset.promote);
     toast(r.ok ? `${fullName(r.player)} signs professional terms` : r.reason, 3400);
@@ -13209,13 +13737,39 @@ function renderAcademy(host){
   });
 }
 
+/* How the squad list is ordered. Thirty players in one fixed order meant
+   hunting for the man you wanted — you could not pull the best to the top,
+   or find who was out of contract, or see who was in form. */
+const SQUAD_SORTS = [
+  {id:"position", label:"Position"},
+  {id:"rating",   label:"Rating"},
+  {id:"age",      label:"Age"},
+  {id:"form",     label:"Form"},
+  {id:"contract", label:"Contract"},
+  {id:"wage",     label:"Wage"},
+];
+let squadSort = "position";
+
+function sortSquadBy(list, how){
+  const order = {GK:0,DF:1,MD:2,FW:3};
+  const yrs = p=> (p.contractYears === undefined) ? 99 : p.contractYears;
+  const frm = p=> { const f = formAverage(p); return f === null ? -1 : f; };
+  return list.slice().sort((a,b)=>{
+    switch(how){
+      case "rating":   return ratingOf(b) - ratingOf(a);
+      case "age":      return a.age - b.age || ratingOf(b) - ratingOf(a);
+      case "form":     return frm(b) - frm(a);
+      case "contract": return yrs(a) - yrs(b) || ratingOf(b) - ratingOf(a);
+      case "wage":     return (b.wage||0) - (a.wage||0);
+      default:         return order[a.pos]-order[b.pos] || b.overall-a.overall;
+    }
+  });
+}
+
 function renderSquadList(host){
   if(!state || !state.clubId || !state.squads) return;   // no career loaded yet
   const club = clubById(state.clubId);
-  const squad = state.squads[club.id].slice().sort((a,b)=>{
-    const order = {GK:0,DF:1,MD:2,FW:3};
-    return order[a.pos]-order[b.pos] || b.overall-a.overall;
-  });
+  const squad = sortSquadBy(state.squads[club.id], squadSort);
   const el = host;
   // An empty squad divided to NaN and printed it on screen.
   const n = squad.length || 1;
@@ -13231,7 +13785,13 @@ function renderSquadList(host){
       <div class="stat-box"><div class="v num" style="color:${unavailable?'var(--bad)':'var(--text)'}">${unavailable}</div><div class="l">Unavailable</div></div>
       <div class="stat-box"><div class="v num" style="font-size:13px;">${currentCaptain()?(currentCaptain().last||currentCaptain().first):"—"}</div><div class="l">Captain</div></div>
     </div>
+    <div class="role-picker"><div class="role-picker-label">Sort by</div>
+      <div class="role-opts">${SQUAD_SORTS.map(o=>
+        `<button class="role-opt${squadSort===o.id?" on":""}" data-ss="${o.id}">${o.label}</button>`).join("")}</div></div>
     <div class="list" id="squadList"></div>`;
+  el.querySelectorAll("[data-ss]").forEach(b=> b.onclick = ()=>{
+    squadSort = b.dataset.ss; playClickSound(); renderSquad();
+  });
   const list = document.getElementById("squadList");
   squad.forEach(p=>{
     const row = document.createElement("div");
@@ -13240,7 +13800,7 @@ function renderSquadList(host){
     const pot = potentialOf(p), cur = ratingOf(p);
     row.innerHTML = `${avatarSVG(p,32)}
       <span class="pos-tag">${positionsOf(p).join("/")}</span>
-      <span class="pname">${flagFor(p.nat)} ${fullName(p)}<span class="mood" title="Morale">${moodIcon(p)}</span>${(()=>{const a=playerAlert(p); return a?`<span class="mood-alert" title="${a.why}">${a.icon}</span>`:"";})()}${p.isCaptain?'<span class="mkt-badge cap">C</span>':p.isViceCaptain?'<span class="mkt-badge vice">VC</span>':''}${p.isYouth?'<span class="tag">ACADEMY</span>':''}${p.listed?'<span class="mkt-badge listed">LISTED</span>':''}${p.loanListed?'<span class="mkt-badge loan">LOAN LIST</span>':''}${p.loanedOutTo?'<span class="mkt-badge loan">ON LOAN</span>':''} ${statusTagHTML(p)}<br>
+      <span class="pname">${p.squadNo?`<span style="display:inline-block; min-width:20px; color:var(--text-dim); font-variant-numeric:tabular-nums; font-weight:700;">${p.squadNo}</span> `:""}${flagFor(p.nat)} ${fullName(p)}<span class="mood" title="Morale">${moodIcon(p)}</span>${(()=>{const a=playerAlert(p); return a?`<span class="mood-alert" title="${a.why}">${a.icon}</span>`:"";})()}${p.isCaptain?'<span class="mkt-badge cap">C</span>':p.isViceCaptain?'<span class="mkt-badge vice">VC</span>':''}${p.isPenTaker?'<span class="mkt-badge cap" title="Takes penalties">PEN</span>':''}${p.caps?`<span class="mkt-badge vice" title="${p.caps} cap${p.caps===1?"":"s"} for ${p.nat}">${p.caps}\u00A0CAP${p.caps===1?"":"S"}</span>`:''}${p.isYouth?'<span class="tag">ACADEMY</span>':''}${p.listed?'<span class="mkt-badge listed">LISTED</span>':''}${p.loanListed?'<span class="mkt-badge loan">LOAN LIST</span>':''}${p.loanedOutTo?'<span class="mkt-badge loan">ON LOAN</span>':''} ${statusTagHTML(p)}<br>
         <span style="font-size:11px; color:var(--text-dim);">${p.apps} app${p.apps===1?"":"s"} · ${p.goals} gls · ${fmtMoney(playerAskingPrice(p, club.tier))}${(p.contractYears!==undefined)?` · ${p.contractYears}yr`:""}</span></span>
       <span class="cond-pill" title="Condition" style="background:${condColour(p)};">${p.condition===undefined?100:Math.round(p.condition)}</span>
       ${formDotsHTML(p)}
@@ -13764,6 +14324,11 @@ function renderTransfers(){
 function addScoutingPanel(area, p){
   if(!area || !p) return;
   if(p.clubId === state.clubId) return;      // you already know your own
+  // Neither of these is a transfer target: one is already your player, the
+  // other is a boy your own scout put in front of you. Offering to scout or
+  // bid for them made no sense at all.
+  if(p.isAcademy || p.clubId === "__academy__") return;
+  if(p.isProspect || p.clubId === "__prospect__") return;
   if(isEasy()) return;                       // nothing hidden, nothing to scout
 
   const know = document.createElement("div");
@@ -13795,7 +14360,9 @@ function openMarketModal(p, kind, price){
   const area = document.getElementById("playerActionArea");
   if(!area) return;
 
-  addScoutingPanel(area, p);
+  // The scouting panel is added AFTER the offer buttons below. Adding it here
+  // meant both offer branches wrote their buttons straight over it, so from
+  // the Market screen you could never scout the man you were about to bid for.
   const myClub = clubById(state.clubId);
   const from = clubById(p.clubId);
 
@@ -13828,6 +14395,7 @@ function openMarketModal(p, kind, price){
       if(r.ok){ closePlayerModal(); toast(`${fullName(p)} signs on a free`); render(); }
       else fail({code:"FA-01", reason:r.reason});
     };
+    addScoutingPanel(area, p);
     return;
   }
 
@@ -13882,6 +14450,7 @@ function openMarketModal(p, kind, price){
     const r = submitOffer(p, "loanToBuy", askL2B);
     if(r.ok){ closePlayerModal(); toast(`${fullName(p)} joins with an option to buy`); render(); } else fail(r);
   };
+  addScoutingPanel(area, p);
 }
 
 function renderTierTabs(container, activeId, onSelect){
@@ -14095,6 +14664,7 @@ function renderClub(){
   renderPillTabs(document.getElementById("clubSubTabs"), [
     {value:"overview", label:"Overview"},
     {value:"facilities", label:"Facilities"},
+    {value:"staff", label:"Staff"},
     {value:"manager", label:"Manager"},
     {value:"commercial", label:"Commercial"},
     {value:"europe", label:"Europe"},
@@ -14106,6 +14676,7 @@ function renderClub(){
   const content = document.getElementById("clubSubContent");
   if(clubSubTab==="overview") renderClubOverview(content, club);
   else if(clubSubTab==="facilities") renderClubFacilities(content, club);
+  else if(clubSubTab==="staff") renderStaff(content, club);
   else if(clubSubTab==="manager") renderManagerScreen(content);
   else if(clubSubTab==="commercial") renderCommercial(content, club);
   else if(clubSubTab==="europe") renderClubEurope(content);
@@ -14117,7 +14688,27 @@ function renderClub(){
 function renderCommercial(host, club){
   const sOffers = state.sponsorOffers || [];
   const nOffers = state.namingOffers || [];
-  let html = `<div class="club-identity">
+  const base = baseTicketPrice(club);
+  const price = ticketPrice(club);
+  const mood = ticketMood();
+  const steps = [];
+  for(let v = Math.max(3, Math.round(base*0.5)); v <= Math.round(base*2); v += Math.max(1, Math.round(base*0.1))) steps.push(v);
+  if(steps.indexOf(price) === -1) steps.push(price);
+  steps.sort((a,b)=>a-b);
+  let html = `<div class="section-title" style="margin-top:0;">Ticket prices</div>
+    <div class="scout-row"><span class="sr-body">
+      <span class="sr-title">${fmtMoney(price)} a ticket${price===base?" — the going rate":price>base?` — ${Math.round((price/base-1)*100)}% above the going rate`:` — ${Math.round((1-price/base)*100)}% below`}</span>
+      <span class="sr-sub">${mood < -6 ? "The supporters think they are being fleeced."
+        : mood < 0 ? "The supporters have noticed the price."
+        : mood > 4 ? "Cheap seats, and the supporters love you for it."
+        : mood > 0 ? "Good value, and they appreciate it."
+        : "Nobody has any complaints about the price."}
+        Charge more and you take more per head, but fewer come through the turnstiles.</span>
+    </span></div>
+    <div class="role-opts" style="margin-bottom:14px;">
+      ${steps.map(v=>`<button class="role-opt${v===price?" on":""}" data-tp="${v}">${fmtMoney(v)}</button>`).join("")}
+    </div>
+    <div class="club-identity">
       <div><span class="ci-label">Stadium</span><span class="ci-value">${stadiumDisplayName(club)}</span></div>
       <div><span class="ci-label">Capacity</span><span class="ci-value">${club.capacity.toLocaleString()}</span></div>
       <div><span class="ci-label">Shirt sponsor</span><span class="ci-value">${club.sponsor?club.sponsor.name+" · "+fmtMoney(club.sponsor.perYear)+"/yr":"None"}</span></div>
@@ -14134,6 +14725,12 @@ function renderCommercial(host, club){
     html += `<div class="empty-hint">No commercial offers outstanding. New ones arrive each pre-season.</div>`;
   }
   host.innerHTML = html;
+  host.querySelectorAll("[data-tp]").forEach(b=> b.onclick = ()=>{
+    playClickSound();
+    const r = setTicketPrice(parseInt(b.dataset.tp, 10));
+    toast(`Tickets set at ${fmtMoney(r.price)}`, 2600);
+    renderClub();
+  });
 
   const sHost = document.getElementById("sponsorOffers");
   if(sHost) sOffers.forEach(o=>{
@@ -14199,6 +14796,68 @@ function renderClubOverview(content, club){
       ].map(([label,val])=>
         `<div class="finance-row"><span>${label}</span><span class="${val>0?'pos':val<0?'neg':''}">${val>=0?'+':''}${fmtMoney(val)}</span></div>`
       ).join("")}</div>` : `<div class="empty-hint">Play a week to see your income breakdown.</div>`}`;
+}
+
+/* The backroom. Who does what, what they are worth to you, and who is looking
+   for a job. */
+function renderStaff(content, club){
+  refreshStaffMarket();
+  const st = staffState();
+  const bill = staffWageBill();
+
+  const card = (role)=>{
+    const man = staffIn(role.id);
+    const lvl = (club.facilities && club.facilities[role.facility]) || 1;
+    const bonus = staffBonus(role.id);
+    const effect = man
+      ? `${role.helps} — working at the level of a ${ (lvl + bonus).toFixed(1) } setup, from ${lvl}`
+      : `${role.helps} — nobody in the job, so you get your facilities and nothing more`;
+    return `<div class="scout-row"><span class="sr-body">
+        <span class="sr-title">${role.title}${man?` — ${man.name}`:` <span style="color:var(--text-dim); font-weight:500;">vacant</span>`}</span>
+        <span class="sr-sub">${man?`Ability ${man.ability}/20 · ${fmtMoney(man.wage)}/week · `:""}${effect}</span>
+      </span></div>
+      ${man?`<div style="display:flex; gap:8px; margin:-4px 0 10px;">
+        <button class="btn-secondary" style="flex:1; padding:7px; font-size:12px; opacity:.8;" data-fire="${role.id}">Let him go</button>
+      </div>`:""}`;
+  };
+
+  const candidates = st.market.slice().sort((a,b)=> b.ability - a.ability);
+
+  content.innerHTML = `
+    <div class="section-title" style="margin-top:0;">Your backroom staff</div>
+    <div class="stat-row" style="margin-top:0; margin-bottom:12px;">
+      <div class="stat-box"><div class="v num">${Object.keys(st.hired).length}/${STAFF_ROLES.length}</div><div class="l">Roles filled</div></div>
+      <div class="stat-box"><div class="v num">${fmtMoney(bill)}</div><div class="l">Staff wages</div></div>
+    </div>
+    ${STAFF_ROLES.map(card).join("")}
+    <div class="section-title">Looking for work</div>
+    <div class="scout-row"><span class="sr-body"><span class="sr-sub">
+      A good man lifts the department he runs — never as much as building the place properly, but he works with what you have. Wages come out of the same pot as your players.
+    </span></span></div>
+    ${candidates.length ? candidates.map(c=>{
+      const role = staffRoleDef(c.role);
+      const affordable = club.balance > c.wage * 20;
+      return `<div class="scout-row"><span class="sr-body">
+          <span class="sr-title">${c.name} <span class="tag" style="margin-left:4px;">${role.title}</span></span>
+          <span class="sr-sub">Ability ${c.ability}/20 · ${fmtMoney(c.wage)}/week</span>
+        </span></div>
+        <div style="display:flex; gap:8px; margin:-4px 0 10px;">
+          <button class="btn-secondary" style="flex:1; padding:7px; font-size:12px;" data-hire="${c.id}"${affordable?"":" disabled"}>${affordable?(staffIn(c.role)?"Hire, replacing "+staffIn(c.role).name:"Hire him"):"Can't afford him"}</button>
+        </div>`;
+    }).join("") : `<div class="scout-row"><span class="sr-body"><span class="sr-sub">Nobody is available at the moment. New people come onto the market each summer.</span></span></div>`}`;
+
+  content.querySelectorAll("[data-hire]").forEach(b=> b.onclick = ()=>{
+    playClickSound();
+    const r = hireStaff(b.dataset.hire);
+    toast(r.ok ? `${r.staff.name} joins as ${staffRoleDef(r.staff.role).title.toLowerCase()}` : r.reason, 3200);
+    renderClub();
+  });
+  content.querySelectorAll("[data-fire]").forEach(b=> b.onclick = ()=>{
+    playClickSound();
+    const r = dismissStaff(b.dataset.fire);
+    toast(r.ok ? `${r.staff.name} has left the club` : r.reason, 3000);
+    renderClub();
+  });
 }
 
 function renderClubFacilities(content, club){
@@ -14358,7 +15017,14 @@ function openPlayerModal(p, isOwn){
   isOwn = !!(p && p.clubId === state.clubId);
   // Free agents have no club, so everything below must tolerate a missing one —
   // this was why the free agent tab opened nothing when tapped.
-  const club = clubById(p.clubId) || {name:"Free agent", tier:(clubById(state.clubId)||{}).tier||"leagueone"};
+  const myTier = (clubById(state.clubId)||{}).tier || "leagueone";
+  const club = clubById(p.clubId) || {
+    name: (p.isAcademy || p.clubId === "__academy__") ? "Your academy"
+        : (p.isProspect || p.clubId === "__prospect__")
+            ? ("Scouted in " + ((typeof youthCountryDef === "function" && p.prospectCountry)
+                ? youthCountryDef(p.prospectCountry).label : "youth football"))
+        : "Free agent",
+    tier: myTier };
   const userTier = clubById(state.clubId).tier;
   const body = document.getElementById("playerModalBody");
   /* Attributes are a squad-only view. A scout brings back an impression, not a
@@ -14434,12 +15100,59 @@ function openPlayerModal(p, isOwn){
   if(reqR) reqR.onclick = ()=>{ resolveTransferRequest(p.id, false); closePlayerModal(); render(); };
 
   const actionArea = document.getElementById("playerActionArea");
-  if(!isOwn) addScoutingPanel(actionArea, p);
+
+  // Academy boys and shortlisted boys get the decisions that apply to them,
+  // rather than the transfer-market panel meant for other clubs' players.
+  const inAcademy  = p.isAcademy  || p.clubId === "__academy__";
+  const onShortlist= p.isProspect || p.clubId === "__prospect__";
+  if(inAcademy || onShortlist){
+    const squadFull = ((state.squads[state.clubId]||[]).length >= SQUAD_MAX);
+    const acFull = (typeof academyFree === "function") && academyFree() <= 0;
+    actionArea.innerHTML = inAcademy
+      ? `<div style="display:flex; gap:8px;">
+           <button class="btn-secondary" style="flex:1;" id="pmPromote"${(squadFull||p.age<16)?" disabled":""}>${p.age<16?"First team from 16":squadFull?"Squad full (30)":(p.age>=ACADEMY_PRO_AGE?"Professional terms":"Promote to first team")}</button>
+           <button class="btn-secondary" style="flex:1; opacity:.75;" id="pmRelease">Release</button>
+         </div>`
+      : `<div style="display:flex; gap:8px;">
+           <button class="btn-secondary" style="flex:1;" id="pmSign"${acFull?" disabled":""}>${acFull?"Academy full":"Sign to academy"}</button>
+           <button class="btn-secondary" style="flex:1; opacity:.75;" id="pmPass">Pass</button>
+         </div>`;
+    const done = msg=>{ toast(msg, 3000); closePlayerModal(); render(); };
+    const bind=(id,fn)=>{ const b=document.getElementById(id); if(b) b.onclick=fn; };
+    bind("pmPromote", ()=>{ const r=promoteFromAcademy(p.id); done(r.ok?`${fullName(p)} signs professional terms`:r.reason); });
+    bind("pmRelease", ()=>{ const r=releaseFromAcademy(p.id); done(r.ok?`${fullName(p)} released`:r.reason); });
+    bind("pmSign",    ()=>{ const r=signToAcademy(p.id);      done(r.ok?`${fullName(p)} joins the academy`:r.reason); });
+    bind("pmPass",    ()=>{ const r=passOnProspect(p.id);     done(r.ok?`Passed on ${fullName(p)}`:r.reason); });
+  }
+  else if(!isOwn) addScoutingPanel(actionArea, p);
   if(isOwn){
     if(p.loanedFrom){
       actionArea.innerHTML = `<div class="empty-hint" style="padding:14px;">On loan from ${clubById(p.loanedFrom)?clubById(p.loanedFrom).name:"another club"} — returns at the end of the season.</div>`;
     } else {
+      const yrsLeft = (p.contractYears === undefined) ? defaultContractYears(p) : p.contractYears;
+      const ask = wageDemand(p);
       actionArea.innerHTML = `
+        ${p.loanedOutTo ? `<div class="renew-row">
+            <div class="renew-name">Out on loan</div>
+            <div class="renew-meta">At ${clubById(p.loanedOutTo)?clubById(p.loanedOutTo).name:"another club"} until the season ends</div>
+            <div class="renew-acts"><button class="btn-secondary" id="recallLoanBtn">Recall him</button></div>
+          </div>` : ""}
+        ${p.agreedToLeave ? `<div class="renew-row">
+            <div class="renew-name">Sold, leaving when the window opens</div>
+            <div class="renew-meta">${(()=>{ const d=(state.agreedDeals||[]).find(x=>x.playerId===p.id);
+              const b=d&&clubById(d.toClub); return d?`To ${b?b.name:"a club"} for ${fmtMoney(d.fee)}`:"Deal agreed"; })()}</div>
+            <div class="renew-acts"><button class="btn-secondary btn-danger" id="cancelDealBtn">Call it off</button></div>
+          </div>` : ""}
+        <div class="renew-row">
+          <div class="renew-name">Contract</div>
+          <div class="renew-meta">
+            ${yrsLeft <= 1
+              ? `<span style="color:var(--bad); font-weight:700;">Final year</span> — he can talk to other clubs`
+              : `${yrsLeft} years remaining`}
+            · on ${fmtMoney(p.wage || 0)}/week${ask > (p.wage||0) ? ` · would want ${fmtMoney(ask)}/week` : ""}
+          </div>
+          <div class="renew-acts"><button class="btn-secondary" id="renewBtn">Offer a new deal</button></div>
+        </div>
         ${p.training ? `<div class="renew-row">
             <div class="renew-name">Learning ${p.training.pos}</div>
             <div class="renew-meta">${p.training.weeksLeft} week${p.training.weeksLeft===1?"":"s"} to go
@@ -14452,6 +15165,28 @@ function openPlayerModal(p, isOwn){
         <button class="btn-secondary" id="listBtn">${p.listed?"Remove from transfer list":"Add to transfer list"}</button>
         <button class="btn-secondary" id="loanListBtn">${p.loanListed?"Remove from loan list":"Add to loan list"}</button>
         ${p.isCaptain?"":`<button class="btn-secondary" id="captainBtn">Make him captain</button>`}
+        ${p.pos!=="GK" ? `<button class="btn-secondary" id="penTakerBtn">${p.isPenTaker?"He no longer takes penalties":"He takes the penalties"}</button>` : ""}
+        ${p.caps ? `<div class="renew-row">
+          <div class="renew-name">International</div>
+          <div class="renew-meta">${p.caps} cap${p.caps===1?"":"s"} for ${p.nat==="English"?"England":p.nat}${p.intGoals?`, ${p.intGoals} goal${p.intGoals===1?"":"s"}`:""}</div>
+        </div>` : ""}
+        <div class="renew-row" style="display:block;">
+          <div class="renew-name">Working on${p.trainFocus?` — ${(TRAIN_FOCUSES.find(f=>f.id===p.trainFocus)||{}).label}`:" nothing in particular"}</div>
+          <div class="renew-meta" style="margin-bottom:6px;">Decides where his improvement lands, not how much of it there is.</div>
+          <div class="role-opts">
+            <button class="role-opt${!p.trainFocus?" on":""}" data-tf="">None</button>
+            ${TRAIN_FOCUSES.map(f=>`<button class="role-opt${p.trainFocus===f.id?" on":""}" data-tf="${f.id}">${f.label}</button>`).join("")}
+          </div>
+        </div>
+        <div class="renew-row" style="display:block;">
+          <div class="renew-name">Shirt number${p.squadNo?` \u2014 currently ${p.squadNo}`:""}</div>
+          <div class="role-opts" style="margin-top:6px;">
+            ${(()=>{ const free = squadNumbersFree(state.clubId).slice(0,14);
+              const opts = (p.squadNo ? [p.squadNo] : []).concat(free);
+              return opts.map(n=>`<button class="role-opt${n===p.squadNo?" on":""}" data-sn="${n}">${n}</button>`).join("");
+            })()}
+          </div>
+        </div>
         <div class="btn-row">
           <button class="btn-secondary fine-btn" data-weeks="1" style="flex:1; margin-top:0;">Fine 1 week</button>
           <button class="btn-secondary fine-btn" data-weeks="2" style="flex:1; margin-top:0;">Fine 2 weeks</button>
@@ -14461,7 +15196,7 @@ function openPlayerModal(p, isOwn){
           Valued at ${fmtMoney(price)}. Players are only sold when a club bids and you accept —
           list him to attract offers.
         </div>
-        <button class="btn-secondary btn-danger" id="releaseBtn">Release (no fee)</button>`;
+        <button class="btn-secondary btn-danger" id="releaseBtn">${releaseCost(p) > 0 ? `Release \u2014 pay him ${fmtMoney(releaseCost(p))}` : "Release"}</button>`;
       /* Wired HERE, after the markup that creates them. These were being bound
          before actionArea.innerHTML existed, so getElementById returned null
          and the Train button silently had no handler at all. */
@@ -14474,6 +15209,78 @@ function openPlayerModal(p, isOwn){
       if(trainBtn) trainBtn.onclick = ()=>{
         closePlayerModal();
         setTimeout(()=> openTrainingPicker(p), 90);
+      };
+
+      // Offering a new deal before he runs his contract down. You could only
+      // ever do this at the expiry gate, which meant watching a player you
+      // wanted to keep walk into his final year with nothing you could do.
+      actionArea.querySelectorAll("[data-tf]").forEach(b=> b.onclick = ()=>{
+        playClickSound();
+        const r = setTrainFocus(p.id, b.dataset.tf || null);
+        toast(r.ok ? (b.dataset.tf ? `${fullName(p)} is working on his ${(TRAIN_FOCUSES.find(f=>f.id===b.dataset.tf)||{}).label.toLowerCase()}` : `${fullName(p)} trains as normal`) : r.reason, 3000);
+        closePlayerModal(); render();
+      });
+
+      actionArea.querySelectorAll("[data-sn]").forEach(b=> b.onclick = ()=>{
+        playClickSound();
+        const r = setSquadNumber(p.id, b.dataset.sn);
+        toast(r.ok
+          ? (r.swappedWith ? `${fullName(p)} takes ${b.dataset.sn}, swapping with ${fullName(r.swappedWith)}`
+                           : `${fullName(p)} will wear ${b.dataset.sn}`)
+          : r.reason, 3000);
+        closePlayerModal(); render();
+      });
+
+      const penBtn = document.getElementById("penTakerBtn");
+      if(penBtn) penBtn.onclick = ()=>{
+        playClickSound();
+        const r = p.isPenTaker ? clearPenaltyTaker() : setPenaltyTaker(p.id);
+        toast(r.ok ? (p.isPenTaker ? `${fullName(p)} takes the penalties` : "Nobody is nominated — the best finisher on the pitch will take them") : r.reason, 3000);
+        closePlayerModal(); render();
+      };
+
+      const recallLoanBtn = document.getElementById("recallLoanBtn");
+      if(recallLoanBtn) recallLoanBtn.onclick = ()=>{
+        playClickSound();
+        const r = recallLoanedPlayer(p.id);
+        toast(r.ok ? `${fullName(p)} recalled from ${r.from?r.from.name:"his loan"}` : r.reason, 3200);
+        closePlayerModal(); render();
+      };
+      const cancelDealBtn = document.getElementById("cancelDealBtn");
+      if(cancelDealBtn) cancelDealBtn.onclick = ()=>{
+        playClickSound();
+        const r = cancelAgreedDeal(p.id);
+        toast(r.ok ? `Deal with ${r.buyer?r.buyer.name:"them"} called off — he isn't happy` : r.reason, 3800);
+        closePlayerModal(); render();
+      };
+
+      const renewBtn = document.getElementById("renewBtn");
+      if(renewBtn) renewBtn.onclick = ()=>{
+        playClickSound();
+        // A man who has just turned you down will not sit back down the next
+        // day. Without this the button could be pressed until the random
+        // refusal happened to pass, which made refusals meaningless.
+        const nowAbs = state.season * CALENDAR_WEEKS + state.week;
+        if(p.renewalRefusedAt && nowAbs - p.renewalRefusedAt < 8){
+          const wait = 8 - (nowAbs - p.renewalRefusedAt);
+          toast(`${fullName(p)} turned you down recently — try again in ${wait} week${wait===1?"":"s"}`, 3600);
+          return;
+        }
+        const v = renewalVerdict(p);
+        if(v.ok){
+          // Extending a man who still has years left never cuts his pay —
+          // otherwise you could re-sign a fading high-earner to slash his wages.
+          p.wage = Math.max(p.wage || 0, v.demand);
+          p.contractYears = defaultContractYears(p);
+          p.renewalHandled = "renewed";
+          p.morale = clamp((p.morale||12) + 2, 1, 20);
+          toast(`${fullName(p)} signs a new deal — ${fmtMoney(v.demand)}/week`, 3400);
+          saveState(true); closePlayerModal(); render();
+        } else {
+          p.renewalRefusedAt = state.season * CALENDAR_WEEKS + state.week;
+          saveState(true);
+          toast(`${fullName(p)} ${v.reason}`, 4200);
+        }
       };
 
       const capBtn = document.getElementById("captainBtn");
@@ -14500,12 +15307,36 @@ function openPlayerModal(p, isOwn){
         toast(now ? `${fullName(p)} transfer listed` : `${fullName(p)} removed from the list`);
         closePlayerModal(); render();
       };
-      document.getElementById("releaseBtn").onclick = ()=>{ releasePlayer(p); closePlayerModal(); render(); };
+      document.getElementById("releaseBtn").onclick = ()=>{
+        const r = releasePlayer(p);
+        // If the club can't afford to pay him off, say so — don't close the
+        // card as if something had happened.
+        if(!r.ok){ toast(r.reason, 4000); return; }
+        closePlayerModal(); render();
+      };
     }
-  } else {
-    actionArea.innerHTML = `<button class="btn-primary" id="buyBtn" style="margin-top:16px;">Buy for ${fmtMoney(price)}</button>
-      <div id="buyMsg" style="text-align:center; font-size:12.5px; color:var(--bad); margin-top:8px;"></div>`;
-    document.getElementById("buyBtn").onclick = ()=>{
+  } else if(!inAcademy && !onShortlist){
+    // Another club's player. Two things used to go wrong here. This branch
+    // also ran for your own academy boys and scouted prospects — who aren't
+    // "yours" in the squad sense — and replaced their Promote, Release, Sign
+    // and Pass buttons with a Buy button that could only crash. And it set the
+    // panel outright, wiping the scouting options that had just been added
+    // above. It now only ever runs for other clubs' players, and adds the
+    // purchase alongside the scouting panel instead of over it.
+    const open = transferWindowOpen();
+    const wait = open ? 0 : weeksUntilWindow();
+    actionArea.insertAdjacentHTML("afterbegin", `
+      <button class="btn-primary" id="buyBtn" style="margin-top:16px;"${open?"":" disabled"}>${
+        open ? `Buy for ${fmtMoney(price)}` : `Window shut — reopens in ${wait} week${wait===1?"":"s"}`}</button>
+      <div id="buyMsg" style="text-align:center; font-size:12.5px; color:var(--bad); margin-top:8px;"></div>`);
+    const buyBtn = document.getElementById("buyBtn");
+    if(buyBtn) buyBtn.onclick = ()=>{
+      // The window is checked again here, not just when the card was drawn —
+      // a card left open across a week change must not let a deal through.
+      if(!transferWindowOpen()){
+        document.getElementById("buyMsg").textContent = "The transfer window is shut.";
+        return;
+      }
       const res = buyPlayer(p);
       if(res.ok){ closePlayerModal(); render(); } else { document.getElementById("buyMsg").textContent = res.reason; }
     };
@@ -14819,6 +15650,25 @@ async function advanceWeek(){
       seasonGoalsFor: ss.goalsFor,
     });
 
+    // A penalty is worth hearing about, scored or missed.
+    if(detail.penalties && detail.penalties.length){
+      detail.penalties.forEach(pen=>{
+        const mine = pen.clubId === state.clubId;
+        const sq = state.squads[pen.clubId] || [];
+        const taker = sq.find(x=> x.id === pen.playerId);
+        if(!taker) return;
+        if(pen.scored){
+          pushNews(mine ? "Penalty scored" : "Penalty against you",
+            `${fullName(taker)} sent the keeper the wrong way from the spot.`, mine ? "match" : "match");
+        } else {
+          pushNews(mine ? "Penalty missed" : "Penalty saved",
+            mine ? `${fullName(taker)} could not convert from twelve yards.`
+                 : `${fullName(taker)} was denied from the spot.`, "match");
+          if(mine) taker.morale = clamp((taker.morale||12) - 1, 1, 20);
+        }
+      });
+    }
+
     if(detail.injuries.length){
       const mine = detail.injuries.filter(i=>i.clubId===state.clubId);
       mine.forEach(i=>{
@@ -14881,10 +15731,15 @@ async function advanceWeek(){
   try{ tickScouting(); }catch(e){ reportError("SCT-01", e, "scouting"); }
   try{ tickYouthScouting(); }catch(e){ reportError("YTH-01", e, "youth scouting"); }
   try{ tickPositionTraining(); }catch(e){ reportError("TRN-01", e, "position training"); }
+  try{ tidySquadRoles(); }catch(e){ reportError("SQD-03", e, "squad roles"); }
   const finance = applyWeeklyFinance(leagueResult);
   // A blank week is a rest week. Without this, fatigue only ever moved on
   // matchdays and a squad never recovered during an international break.
-  if(!fatigueApplied) applyFatigue(state.clubId, false);
+  if(!fatigueApplied){
+    applyFatigue(state.clubId, false);
+    // No club fixture means the internationals are on.
+    try{ runInternationalBreak(); }catch(e){ reportError("INT-01", e, "international break"); }
+  }
   state.week++;
 
   if(state.week > CALENDAR_WEEKS){
@@ -15942,6 +16797,9 @@ function renderSlotPicker(){
    ------------------------------------------------------------------------- */
 function backfillState(){
   state.matchHistory = Array.isArray(state.matchHistory) ? state.matchHistory : [];
+  // Shirt numbers for a save made before they existed, and for anyone who has
+  // arrived since without one.
+  try{ Object.keys(state.squads || {}).forEach(cid=> assignSquadNumbers(cid)); }catch(e){}
   state.freeAgents = state.freeAgents||[]; state.offers = state.offers||[];
   state.transferRequests = state.transferRequests||[]; state.jobOffers = state.jobOffers||[];
   state.sackPressure = state.sackPressure||0; state.pendingCupGate = state.pendingCupGate||0;
@@ -16741,17 +17599,24 @@ function openScouting(){
   if(!sc.jobs.length && !sc.assignments.length){
     out.innerHTML = `<div class="scout-row"><span class="sr-body"><span class="sr-sub">Nobody is out. Send someone.</span></span></div>`;
   } else {
-    out.innerHTML = sc.jobs.map(j=>{
+    out.innerHTML = sc.jobs.map((j,i)=>{
       const p = findPlayerAnywhere(j.playerId);
       const wks = Math.max(0, j.due - state.week);
       return `<div class="scout-row"><span class="sr-body">
         <span class="sr-title">Watching ${p?fullName(p):"a player"}</span>
-        <span class="sr-sub">Report in ${wks} week${wks===1?"":"s"}</span></span></div>`;
-    }).join("") + sc.assignments.map(a=>{
+        <span class="sr-sub">Report in ${wks} week${wks===1?"":"s"}</span></span></div>
+        <div style="display:flex; gap:8px; margin:-4px 0 10px;">
+          <button class="btn-secondary" style="flex:1; padding:7px; font-size:12px; opacity:.8;" data-stopwatch="${i}">Stop watching</button>
+        </div>`;
+    }).join("") + sc.assignments.map((a,i)=>{
       const wks = Math.max(0, a.due - state.week);
       return `<div class="scout-row"><span class="sr-body">
-        <span class="sr-title">${a.looking==="prospects"?"Prospects":"First team"} · ${a.position==="ANY"?"any position":a.position} · age ${a.minAge}-${a.maxAge}</span>
-        <span class="sr-sub">${a.tier==="ANY"?"Anywhere":tierName(a.tier)} · report in ${wks} week${wks===1?"":"s"}</span></span></div>`;
+        <span class="sr-title">${a.looking==="prospects"?"Prospects":"First team"} · ${a.position==="ANY"?"any position":a.position} · age ${a.minAge}-${a.maxAge}${a.isAuto?` <span class="tag" style="margin-left:4px;">REPEATING</span>`:""}</span>
+        <span class="sr-sub">${a.tier==="ANY"?"Anywhere":tierName(a.tier)} · report in ${wks} week${wks===1?"":"s"}</span></span></div>
+        <div style="display:flex; gap:8px; margin:-4px 0 10px;">
+          ${a.isAuto?`<button class="btn-secondary" style="flex:1; padding:7px; font-size:12px;" data-stoprepeat="${i}">Stop repeating</button>`:""}
+          <button class="btn-secondary" style="flex:1; padding:7px; font-size:12px; opacity:.8;" data-recall="${i}">Recall scout</button>
+        </div>`;
     }).join("");
   }
   host.appendChild(out);
@@ -16858,6 +17723,24 @@ function openScouting(){
   const autoBtn = document.getElementById("scoutAuto");
   if(autoBtn) autoBtn.onclick = ()=>{ scoutBrief.isAuto = !scoutBrief.isAuto; playClickSound(); openScouting(); };
 
+  // Recalling and stopping repeats. Without these a repeating brief renewed
+  // itself for ever and the scout could never be got back.
+  host.querySelectorAll("[data-recall]").forEach(b=> b.onclick = ()=>{
+    const r = recallAssignment(parseInt(b.dataset.recall,10));
+    toast(r.ok ? "Scout recalled — he's available again" : r.reason, 2800);
+    playClickSound(); openScouting();
+  });
+  host.querySelectorAll("[data-stoprepeat]").forEach(b=> b.onclick = ()=>{
+    const r = stopAssignmentRepeat(parseInt(b.dataset.stoprepeat,10));
+    toast(r.ok ? "He'll come back after this trip and stay put" : r.reason, 3000);
+    playClickSound(); openScouting();
+  });
+  host.querySelectorAll("[data-stopwatch]").forEach(b=> b.onclick = ()=>{
+    const r = recallWatch(parseInt(b.dataset.stopwatch,10));
+    toast(r.ok ? "Stopped watching him" : r.reason, 2600);
+    playClickSound(); openScouting();
+  });
+
   document.getElementById("scoutBackdrop").classList.add("open");
 }
 
@@ -16894,11 +17777,14 @@ function openYouthWatch(){
   if(!ys.assignments.length){
     out.innerHTML = `<div class="scout-row"><span class="sr-body"><span class="sr-sub">Nobody is out looking for young talent.</span></span></div>`;
   } else {
-    out.innerHTML = ys.assignments.map(a=>{
+    out.innerHTML = ys.assignments.map((a,i)=>{
       const wks = Math.max(0, a.due - state.week);
       return `<div class="scout-row"><span class="sr-body">
         <span class="sr-title">Scouting ${youthCountryDef(a.country).label}</span>
-        <span class="sr-sub">Shortlist in ${wks} week${wks===1?"":"s"}</span></span></div>`;
+        <span class="sr-sub">Shortlist in ${wks} week${wks===1?"":"s"}</span></span></div>
+        <div style="display:flex; gap:8px; margin:-4px 0 10px;">
+          <button class="btn-secondary" style="flex:1; padding:7px; font-size:12px; opacity:.8;" data-yrecall="${i}">Recall scout</button>
+        </div>`;
     }).join("");
   }
   host.appendChild(out);
@@ -16942,7 +17828,7 @@ function openYouthWatch(){
       const ceil = Math.round(to100(potentialOf(p)));
       const band = ceilingBand(p);
       const col = band.cls === "good" ? "var(--good)" : band.cls === "dim" ? "var(--text-dim)" : "var(--text)";
-      return `<div class="scout-row"><span class="sr-body">
+      return `<div class="scout-row" data-openshort="${p.id}"><span class="sr-body">
           <span class="sr-title">${flagFor(p.nat)} ${fullName(p)}<span class="tag" style="margin-left:6px;">${p.age}</span><span class="tag" style="margin-left:4px;">${posOf(p)}</span></span>
           <span class="sr-sub"><span style="color:${col}; font-weight:${band.weight};">${band.text}</span> · now <strong>${now}</strong>, ceiling <strong>${ceil}</strong> · ${youthCountryDef(p.prospectCountry).label}</span>
         </span></div>
@@ -16977,6 +17863,15 @@ function openYouthWatch(){
   }
 
   host.querySelectorAll("[data-yc]").forEach(b=> b.onclick = ()=>{ state._youthPickCountry = b.dataset.yc; playClickSound(); openYouthWatch(); });
+  host.querySelectorAll("[data-yrecall]").forEach(b=> b.onclick = ()=>{
+    const r = recallYouthAssignment(parseInt(b.dataset.yrecall,10));
+    toast(r.ok ? "Scout recalled — he's available again" : r.reason, 2800);
+    playClickSound(); openYouthWatch();
+  });
+  host.querySelectorAll("[data-openshort]").forEach(r=> r.onclick = ()=>{
+    const pl = youthScoutState().shortlist.find(x=> x.id === r.dataset.openshort);
+    if(pl){ playClickSound(); openPlayerModal(pl); }
+  });
   host.querySelectorAll("[data-sign]").forEach(b=> b.onclick = ()=>{
     const r = signToAcademy(b.dataset.sign);
     toast(r.ok ? `${fullName(r.player)} joins the academy` : r.reason, 3200);
@@ -17471,10 +18366,121 @@ function runSmokeTest(force){
 const SCOUT_LEVELS = ["Unseen", "Watched", "Scouted", "Known"];
 
 // How long a look takes. A better scouting setup is quicker and more accurate.
+/* =========================================================================
+   COACHING STAFF — the people who actually do the work. The club had a
+   manager and nobody else, which for a football club is a strange thing to be
+   missing: no coach on the training ground, no physio, nobody running the
+   academy, nobody heading up recruitment.
+
+   Staff supplement your facilities rather than replace them. A good coach at
+   a poor training ground still gets more out of a player than no coach at
+   all, and a brilliant one at a fine ground is better again — but neither
+   substitutes for building the place properly.
+   ========================================================================= */
+const STAFF_ROLES = [
+  {id:"coach",       title:"First-team coach",        helps:"Squad development",  facility:"training"},
+  {id:"physio",      title:"Head physio",             helps:"Injuries and recovery", facility:"medical"},
+  {id:"headOfYouth", title:"Head of youth development", helps:"The academy",      facility:"youth"},
+  {id:"chiefScout",  title:"Chief scout",             helps:"Scouting",           facility:"recruitment"},
+];
+function staffRoleDef(id){ return STAFF_ROLES.find(r=>r.id===id) || STAFF_ROLES[0]; }
+
+function staffState(){
+  if(!state.staff) state.staff = {hired:{}, market:[], marketSeason:null};
+  state.staff.hired = state.staff.hired || {};
+  state.staff.market = state.staff.market || [];
+  return state.staff;
+}
+function staffIn(roleId){ return staffState().hired[roleId] || null; }
+
+/* What a man in that job is worth to you, as a small addition to the relevant
+   facility level. Deliberately modest: a top man is worth about a level and a
+   half of bricks and mortar, never more. */
+function staffBonus(roleId){
+  const st = staffIn(roleId);
+  if(!st) return 0;
+  const full = clamp((st.ability - 8) / 7, -0.4, 1.6);
+  // A man has to work with the squad before he makes a difference, and
+  // development is only settled once a season. Without this you could hire a
+  // top coach in the last week, bank a whole season of his work, and let him
+  // go in the first week of the next for a fortnight's wages.
+  if(full <= 0 || !st.hiredAbs) return full;          // a poor man hurts at once
+  const weeks = (state.season * CALENDAR_WEEKS + state.week) - st.hiredAbs;
+  return full * clamp(weeks / 20, 0, 1);
+}
+
+function staffWageFor(ability, tier){
+  // Pegged to what the division itself earns, so a Premier League coach is
+  // paid like one and a National League physio is not.
+  const base = (TIER_INCOME_BASE && TIER_INCOME_BASE[tier]) || 2000;
+  return Math.max(150, Math.round(base * 0.06 * (0.5 + ability * 0.075)));
+}
+
+function makeStaffCandidate(roleId, tier){
+  const nm = nameForNationality(pick(["English","Welsh","Scottish","Irish"]));
+  // Better clubs attract better people.
+  const tierLift = {premierleague:5, championship:3, leagueone:1.5, leaguetwo:0.5}[tier] || 0;
+  const ability = clamp(Math.round(rnd(4, 13) + tierLift + rnd(-1.5, 1.5)), 1, 20);
+  return {id:"st"+Math.random().toString(36).slice(2,9), role:roleId,
+    name: nm.first + " " + nm.last, ability,
+    wage: staffWageFor(ability, tier)};
+}
+
+/* A fresh set of people looking for work each season. */
+function refreshStaffMarket(force){
+  const st = staffState();
+  const club = clubById(state.clubId);
+  if(!club) return;
+  if(!force && st.marketSeason === state.season && st.market.length) return;
+  st.marketSeason = state.season;
+  st.market = [];
+  STAFF_ROLES.forEach(r=>{
+    const n = rndInt(2,4);
+    for(let i=0;i<n;i++) st.market.push(makeStaffCandidate(r.id, club.tier));
+  });
+}
+
+function hireStaff(candidateId){
+  const st = staffState();
+  const club = clubById(state.clubId);
+  const cand = st.market.find(c=> c.id === candidateId);
+  if(!cand) return {ok:false, reason:"He has taken another job."};
+  const existing = st.hired[cand.role];
+  cand.hiredAbs = state.season * CALENDAR_WEEKS + state.week;
+  st.hired[cand.role] = cand;
+  st.market = st.market.filter(c=> c.id !== candidateId);
+  pushNews("Backroom appointment",
+    `${cand.name} joins as ${staffRoleDef(cand.role).title.toLowerCase()} on ${fmtMoney(cand.wage)} a week.` +
+    (existing ? ` ${existing.name} leaves the club.` : ""), "board");
+  saveState(true);
+  return {ok:true, staff:cand, replaced:existing||null};
+}
+
+function dismissStaff(roleId){
+  const st = staffState();
+  const man = st.hired[roleId];
+  if(!man) return {ok:false, reason:"Nobody holds that job."};
+  // Letting a man go means paying him off, as it would at any club.
+  const club = clubById(state.clubId);
+  const payoff = (man.wage || 0) * 8;
+  if(club) club.balance -= payoff;
+  delete st.hired[roleId];
+  pushNews("Backroom departure",
+    `${man.name} has left his role as ${staffRoleDef(roleId).title.toLowerCase()}, paid ${fmtMoney(payoff)} in compensation.`, "board");
+  saveState(true);
+  return {ok:true, staff:man};
+}
+
+function staffWageBill(){
+  const st = staffState();
+  return Object.keys(st.hired).reduce((sum,k)=> sum + (st.hired[k].wage||0), 0);
+}
+
 function scoutQuality(){
   const club = clubById(state.clubId);
   const lvl = (club && club.facilities && club.facilities.recruitment) || 1;
-  return clamp(lvl, 1, 5);
+  const chief = (typeof staffBonus === "function") ? staffBonus("chiefScout") : 0;
+  return clamp(Math.round(lvl + chief), 1, 5);
 }
 // Recruitment Centre level is deliberately the source of scouting capacity.
 // Youth academy improves the players you produce; recruitment improves the
@@ -17516,6 +18522,11 @@ function knowledgeOf(p){
   if(!p) return 3;
   if(isEasy()) return 3;                           // nothing hidden
   if(p.clubId === state.clubId) return 3;          // your own men
+  // A boy in your own academy is as much yours as anyone in the squad, and a
+  // boy on a scout's shortlist has been watched for weeks — that is the whole
+  // point of sending someone. Neither should be shown behind a fog.
+  if(p.isAcademy || p.clubId === "__academy__") return 3;
+  if(p.isProspect || p.clubId === "__prospect__") return 3;
   const r = scoutState().reports[p.id];
   return r ? r.level : 0;
 }
@@ -17748,6 +18759,40 @@ function startAssignment(brief){
 }
 
 // Runs each week. Anything due comes back.
+/* Calling a scout back. Nothing about a scouting trip should be irreversible:
+   a brief set to repeat kept renewing itself with no way to stop it, so the
+   scout was tied up for good and you could end up with none available at all.
+   Recalling ends the trip there and then and frees the man immediately. */
+function recallAssignment(index){
+  const sc = scoutState();
+  if(index < 0 || index >= sc.assignments.length) return {ok:false, reason:"That scout is already back."};
+  const a = sc.assignments.splice(index, 1)[0];
+  saveState(true);
+  return {ok:true, assignment:a};
+}
+function stopAssignmentRepeat(index){
+  const sc = scoutState();
+  const a = sc.assignments[index];
+  if(!a) return {ok:false, reason:"That scout is already back."};
+  a.isAuto = false;
+  saveState(true);
+  return {ok:true};
+}
+function recallWatch(index){
+  const sc = scoutState();
+  if(index < 0 || index >= sc.jobs.length) return {ok:false, reason:"Nobody is watching him."};
+  sc.jobs.splice(index, 1);
+  saveState(true);
+  return {ok:true};
+}
+function recallYouthAssignment(index){
+  const ys = youthScoutState();
+  if(index < 0 || index >= ys.assignments.length) return {ok:false, reason:"That scout is already back."};
+  const a = ys.assignments.splice(index, 1)[0];
+  saveState(true);
+  return {ok:true, assignment:a};
+}
+
 function tickScouting(){
   const sc = scoutState();
   const done = [];
@@ -18024,7 +19069,8 @@ function tickYouthScouting(){
    makes the decision at eighteen a real one. */
 function developProspect(p){
   const club = clubById(state.clubId);
-  const youthLevel = (club && club.facilities && club.facilities.youth) || 2;
+  const youthLevel = ((club && club.facilities && club.facilities.youth) || 2)
+    + (typeof staffBonus === "function" ? staffBonus("headOfYouth") : 0);
   const pot = p.potential || p.overall;
   const gap = pot - p.overall;
   let delta = gap > 0 ? (0.45 + gap * 0.18) * (0.75 + youthLevel * 0.13) : 0;
@@ -18165,6 +19211,10 @@ function promoteFromAcademy(playerId){
   const ac = academyState();
   const p = ac.players.find(x=> x.id === playerId);
   if(!p) return {ok:false, reason:"He is no longer in the academy."};
+  // Sixteen is the earliest a boy can be taken onto professional forms. Before
+  // this a thirteen-year-old could be put straight into the first-team squad.
+  if(p.age < 16)
+    return {ok:false, reason:`${fullName(p)} is ${p.age} — he can't join the first team until he is 16.`};
   if(state.squads[club.id].length >= SQUAD_MAX)
     return {ok:false, reason:"Your senior squad is full (30 maximum)."};
   ac.players = ac.players.filter(x=> x !== p);
@@ -19685,6 +20735,19 @@ function ensureClubExpansionData(){
     if(!p.personality) p.personality = seedPlayerPersonality(p);
   }));
 }
+/* What you charge shows up in how the supporters feel about you. */
+function ticketMood(){
+  const club = clubById(state.clubId);
+  if(!club) return 0;
+  const ratio = ticketPrice(club) / baseTicketPrice(club);
+  if(ratio >= 1.5) return -9;
+  if(ratio >= 1.25) return -5;
+  if(ratio > 1.05) return -2;
+  if(ratio <= 0.7) return 6;
+  if(ratio < 0.95) return 3;
+  return 0;
+}
+
 function supporterConfidence(){
   const club=clubById(state.clubId); if(!club) return 50;
   const base=Number(club.supporterBase||60);
@@ -19695,6 +20758,8 @@ function supporterConfidence(){
   let v=base*0.45 + board*0.35 + 20;
   v += clamp(form,-20,20);
   if(rival==='win') v+=8; else if(rival==='loss') v-=8;
+  // What it costs them to get in.
+  try{ v += ticketMood(); }catch(e){}
   return clamp(Math.round(v),0,100);
 }
 function updateClubConfidence(){
@@ -19725,6 +20790,31 @@ function renderBoardroom(content, club){
     ${rival?`<div class="section-title">Next rivalry test</div><div class="confidence-card"><div class="confidence-row"><b>${rival.name}</b><span>${club.nickname||''}</span></div><div class="sub" style="margin-top:5px">Results against your main rival have extra weight with supporters.</div></div>`:""}
     <div class="section-title">Facilities</div>
     <div class="sub">Training Lv.${club.facilities.training} · Youth Lv.${club.facilities.youth} · Medical Lv.${club.facilities.medical} · Stadium Lv.${club.facilities.stadium}</div>`;
+
+  // Leaving the job. Previously the only way out of a club was to be sacked.
+  const resignHost = document.createElement("div");
+  resignHost.innerHTML = `
+    <div class="section-title">Your position</div>
+    <div class="scout-row"><span class="sr-body">
+      <span class="sr-title">Manager of ${club.name}</span>
+      <span class="sr-sub">Resigning costs you a little standing, and the club will appoint someone else straight away.</span>
+    </span></div>
+    <button class="btn-secondary" id="resignBtn" style="opacity:.85;">Resign as manager</button>`;
+  content.appendChild(resignHost);
+  const rb = resignHost.querySelector("#resignBtn");
+  if(rb) rb.onclick = ()=>{
+    playClickSound();
+    if(rb.dataset.armed !== "1"){
+      rb.dataset.armed = "1";
+      rb.textContent = "Tap again to confirm you are resigning";
+      rb.style.color = "var(--bad)";
+      setTimeout(()=>{ if(rb && rb.dataset.armed === "1"){ rb.dataset.armed = "0"; rb.textContent = "Resign as manager"; rb.style.color = ""; } }, 5000);
+      return;
+    }
+    const r = resignPost();
+    toast(r.ok ? `You have resigned from ${r.club.name}` : r.reason, 3600);
+    render();
+  };
 }
 function renderClubIdentity(content, club){
   const peers=Object.values(CLUB_META).filter(c=>c&&!c.hidden&&c.id!==club.id&&c.tier===club.tier).sort((a,b)=>a.name.localeCompare(b.name));
