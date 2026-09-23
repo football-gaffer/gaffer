@@ -4540,11 +4540,12 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "5.8.0";
+const GAME_VERSION = "5.8.1";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
 const VERSION_NOTES = {
+  "5.8.1": "In League One and League Two a result could appear that you were never told about. Those divisions have 24 clubs, which means 46 rounds squeezed into 42 weeks, so four weeks carry a midweek game as well — and on those weeks your second fixture was simulated with no word of it and no team selection. It is still your assistant who takes the midweek game, but he now reports it, with the score and who it was against.",
   "5.8.0": "The laws of the game, enforced properly. A suspension counted down on the calendar rather than in matches, so a banned player could sit out an international break and miss nothing at all — a booking or a sending-off cost you nothing. A ban is now served by missing a game; injuries still heal with time, as they should. During a match you could also bring on a player who was already on the pitch, which put him in the side twice and quietly removed a teammate, or bring back a player you had already substituted. Neither is possible now. Five bookings still earn a one-match ban, a red card one to three, and five substitutions are allowed.",
   "5.7.3": "Every player in your squad was being capped by his country. The standard you had to reach was written on the game's internal rating scale instead of the one shown on a player's card, so the bar sat far below any professional and the whole squad went away at every international break. The bars now sit where they should — around 87 for Brazil or France, 74 for Wales — so a call-up means something again, and an emerging under-21 is still looked at a little earlier.",
   "5.7.2": "Housekeeping after a full sweep of the code for settings the game reads but never sets — the fault behind three systems that had quietly never worked. This time it came back clean apart from one dead term in how club standing is worked out, which always counted as nothing and has been removed. Two failures that could quietly corrupt a save — the counter that stops two players sharing an id, and shirt numbering — now report themselves instead of passing in silence.",
@@ -15548,8 +15549,15 @@ async function advanceWeek(){
     const isUserTier = lid===userTier;
     const weekFixtures = league.fixtures.filter(f=>f.week===week && !f.played);
     const myFixture = isUserTier ? weekFixtures.find(f=>f.home===state.clubId || f.away===state.clubId) : null;
+    // In a 24-club division 46 rounds are squeezed into 42 weeks, so four weeks
+    // carry a midweek game as well. Your club then has TWO league fixtures that
+    // week: you manage the first, and your assistant takes the midweek one.
+    // That used to happen silently — the result simply appeared in the table
+    // with no word of it and no team selection.
+    const myExtras = [];
     weekFixtures.forEach(f=>{
       if(f===myFixture) return;
+      if(isUserTier && (f.home===state.clubId || f.away===state.clubId)) myExtras.push(f);
       // Derby, weather and league stakes apply to every fixture, not just yours.
       const ctx = buildMatchContext(f.home, f.away, lid, "league");
       const {hg,ag} = simulateScore(state.squads[f.home], state.squads[f.away], ctx);
@@ -15560,6 +15568,16 @@ async function advanceWeek(){
       recordQuickStats(f.away, ag, hg);
     });
     league._pendingUserFixture = myFixture || null;
+    myExtras.forEach(f=>{
+      const opp = clubById(f.home===state.clubId ? f.away : f.home);
+      const mine = f.home===state.clubId ? f.hg : f.ag;
+      const theirs = f.home===state.clubId ? f.ag : f.hg;
+      pushNews("Midweek fixture",
+        `Your assistant took charge of the midweek game ${f.home===state.clubId?"at home to":"away at"} ` +
+        `${opp?opp.name:"your opponents"}: ${mine}-${theirs}. ` +
+        `A 24-team division plays four midweek rounds, so you have two league games this week.`,
+        "match");
+    });
   });
 
   // Pre-season friendlies are ordinary fixtures on the calendar.
