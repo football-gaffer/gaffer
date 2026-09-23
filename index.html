@@ -3310,50 +3310,34 @@ function _teamRatingsRaw(squad){
   const avg = (arr,fn)=> arr.length? arr.reduce((s,p)=>s+fn(p),0)/arr.length : 10;
   const base = { attack: avg(attackers, p=>(p.shooting+p.passing+p.pace)/3),
                  defense: avg(defenders, p=>(p.defending+p.physical)/2) };
+  // Numbers on the pitch. Strength is the AVERAGE of whoever is playing, so a
+  // side of seven good players rated exactly the same as eleven, and an injury
+  // crisis that left you short cost nothing at all. Each missing man now hurts.
+  const onPitch = playing.length;
+  if(onPitch < 11){
+    const short = clamp(1 - (11 - onPitch) * 0.09, 0.4, 1);
+    base.attack *= short;
+    base.defense *= short;
+  }
+  // No recognised goalkeeper. An outfielder was simply stood in goal with no
+  // effect on the defence whatsoever.
+  if(onPitch && !playing.some(p=> p.pos === "GK")) base.defense *= 0.8;
   // Playing men out of position costs you. Only your own selected XI is judged.
   if(playing.length && playing[0].clubId === state.clubId){
     const pen = shapePenalty(playing);
     base.attack *= pen;
     base.defense *= pen;
-    // Formation modifier: 3-5-2 boosts attack, 5-3-2 boosts defense, etc.
-    const formMod = formationModifier(state.tactics);
-    base.attack *= formMod.attack;
-    base.defense *= formMod.defense;
-    // Tactics modifier: aggressive +attack -defense, defensive -attack +defense
-    const tacticsMod = tacticsModifier(state.tactics);
-    base.attack *= tacticsMod.attack;
-    base.defense *= tacticsMod.defense;
+    // Formation, mentality and pressing are NOT applied here. They are applied
+    // once, by userTacticalMultipliers() in simulateScore and the match view,
+    // using the balanced values in FORMATIONS and MENTALITIES. A second layer
+    // added here in 3.10.6 counted the formation twice with conflicting
+    // numbers — erasing most of 4-3-3's defensive cost — and read a
+    // tactics.philosophy field the game never sets, so it did nothing else.
   }
   return base;
 }
 
-/* Formation shapes give natural bonuses/penalties to attack and defense.
-   Formations with more forwards boost attack; formations with more defenders boost defense. */
-function formationModifier(tactics){
-  if(!tactics || !tactics.formation) return {attack:1, defense:1};
-  const form = tactics.formation;
-  const mods = {
-    "3-5-2": {attack:1.08, defense:0.95},  // attacking
-    "4-3-3": {attack:1.05, defense:1.02},  // balanced attack
-    "4-4-2": {attack:1.0, defense:1.0},    // neutral
-    "4-5-1": {attack:0.98, defense:1.03},  // defensive
-    "5-3-2": {attack:0.95, defense:1.08},  // very defensive
-    "5-4-1": {attack:0.94, defense:1.10},  // ultra defensive
-  };
-  return mods[form] || {attack:1, defense:1};
-}
 
-/* Match philosophy and tactical intent. Aggressive swaps attack for defense, defensive does the reverse. */
-function tacticsModifier(tactics){
-  if(!tactics || !tactics.philosophy) return {attack:1, defense:1};
-  const phil = tactics.philosophy;
-  const mods = {
-    "aggressive": {attack:1.12, defense:0.92},
-    "balanced": {attack:1.0, defense:1.0},
-    "defensive": {attack:0.88, defense:1.15},
-  };
-  return mods[phil] || {attack:1, defense:1};
-}
 
 /* Average fit of the XI against the shape it is asked to play, mapped onto a
    multiplier. A side entirely in position plays at full strength; a badly
@@ -4076,7 +4060,7 @@ const P_KEYS = ["id","clubId","first","last","age","pos","isReal","nat","potenti
   "isCaptain","isViceCaptain","promisedStart","finesReceived","unsettled","disciplinary","evt","awardsExtra","sponsor","stadiumName",
   // Appended, never reordered: old saves decode positionally, so anything new
   // has to go on the end where it simply reads as absent.
-  "isPenTaker","squadNo","trainFocus","caps","intGoals","lastCapSeason","renewalRefusedAt","joinedAbs",
+  "isPenTaker","squadNo","trainFocus","caps","intGoals","lastCapSeason","renewalRefusedAt","joinedAbs","optionToBuy",
   // These were all being assigned and then silently dropped on every reload —
   // form and ambition since the beginning, the last three since they were added.
   "form","ambition","avatarSeed","lastRating","quitting",
@@ -4150,7 +4134,7 @@ function unpackFixtures(packed){
 // Only the mutable half of a club record is worth writing.
 const CLUB_SAVE_KEYS = ["balance","stature","capacity","facilities","stadiumDev","hidden","shadowOf","nickname","rivalId","philosophy","boardStyle","supporterBase",
   "justRelegated","justPromoted","tier","wageBudget","transferEmbargo","pointsDeduction",
-  "inAdministration","manager","vacantSince"];
+  "inAdministration","manager","vacantSince","relegatedSeason"];
 function packClubMeta(meta){
   const out = {};
   Object.keys(meta).forEach(id=>{
@@ -4556,11 +4540,21 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "5.6.4";
+const GAME_VERSION = "5.8.0";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
 const VERSION_NOTES = {
+  "5.8.0": "The laws of the game, enforced properly. A suspension counted down on the calendar rather than in matches, so a banned player could sit out an international break and miss nothing at all — a booking or a sending-off cost you nothing. A ban is now served by missing a game; injuries still heal with time, as they should. During a match you could also bring on a player who was already on the pitch, which put him in the side twice and quietly removed a teammate, or bring back a player you had already substituted. Neither is possible now. Five bookings still earn a one-match ban, a red card one to three, and five substitutions are allowed.",
+  "5.7.3": "Every player in your squad was being capped by his country. The standard you had to reach was written on the game's internal rating scale instead of the one shown on a player's card, so the bar sat far below any professional and the whole squad went away at every international break. The bars now sit where they should — around 87 for Brazil or France, 74 for Wales — so a call-up means something again, and an emerging under-21 is still looked at a little earlier.",
+  "5.7.2": "Housekeeping after a full sweep of the code for settings the game reads but never sets — the fault behind three systems that had quietly never worked. This time it came back clean apart from one dead term in how club standing is worked out, which always counted as nothing and has been removed. Two failures that could quietly corrupt a save — the counter that stops two players sharing an id, and shirt numbering — now report themselves instead of passing in silence.",
+  "5.7.1": "European coefficients were being wiped every season. The game keeps a five-year record of how each country's clubs do in Europe, so nations rise and fall — but the check that rebuilds it when missing was written against the wrong field name, so it was always true and re-seeded every country from scratch after every season and on every load, destroying the points they had just earned. Countries could never move. They now accumulate the way they were meant to.",
+  "5.7.0": "International duty now actually tires a player. The code meant to take the edge off a man who had been away with his country was written against a fitness field that does not exist, and the wrong way round, so it silently never ran — a week on international duty cost nothing at all. It now takes six points off his condition, with a floor. Also removed a second, unused record of who your captain is; the armband was already tracked on the player himself, and two records of the same thing is how they end up disagreeing.",
+  "5.6.9": "Points deductions now punish one season instead of for ever. A club that went into administration was docked those points in every table from then on, and a second administration added to it permanently — enough to bury a club, yours included, for the rest of a save. The deduction now applies to the season it was imposed in, settled once promotion and relegation are decided, and clubs come back out of administration. Relegated clubs also had a promotion boost that never expired, so the same sides bounced straight back season after season and the lower leagues never changed; parachute money now runs out after two seasons.",
+  "5.6.8": "Numbers on the pitch now matter. A team's strength was the average of whoever was playing, so a side hit by injuries and left with seven fit men rated exactly the same as a full eleven — being short cost nothing. Each missing player now weakens the side. And with no goalkeeper available an outfielder went in goal with no effect whatever on the defence; he now concedes the way you would expect. A normal side of eleven with a keeper plays exactly as before. Also removed an unused leftover from how European places used to be worked out; the table actually in use was checked and is correct, 36 places in each competition.",
+  "5.6.7": "Transfer clauses now do what they say. When you bought a player whose old club kept a sell-on, that club never saw a penny when you sold him on — every sale credited you the whole fee. They now get their percentage. Buy-back clauses were shown on a player's card and never acted on; a former club can now reclaim him, but only in a transfer window, never in his first half-season with you, and only once he has become a bargain at the agreed price — which was set well above what you paid, so you profit even as you lose him, and your action list warns you when one becomes possible. A quick double tap when choosing a pre-season tour could bank its fee twice; it can't now. And stadium naming rights paid a season less than the deal promised; they now pay the full term. Three leftover functions that nothing used have been removed — one of them would have sold a player to no club at all if it had ever been called.",
+  "5.6.6": "Loan with an option to buy now does what it says. It used to buy the player outright on the spot, at a premium over a normal bid, and attach an 'option to buy' to a man who was already yours — so there was no loan and no decision. It is now a genuine loan: you pay the loan fee and share his wages, and at any point before the summer you can make it permanent for the agreed price from his card or your action list, or let him go back. Players returning from a loan also now go home on their proper wages; the reduced loan share used to stick to them for good.",
+  "5.6.5": "Tactics, corrected. Version 3.10.6 added a second formation bonus on top of the one the game already had, with different numbers — so your formation counted twice, and 4-3-3 lost most of the defensive cost it was designed to carry. Its tactics half never worked at all, and your opponents never got the extra layer, so it quietly favoured you. That layer is gone and tactics work exactly as designed: formation, mentality and pressing, applied once. Two built-in shapes were never worth picking — 4-2-3-1 had more attack than 4-4-2 despite playing one striker, and 4-5-1 was worse than 5-3-2 at both ends — and both now trade properly. Custom formations were the bigger loophole: more than half of all possible home-made shapes beat a named formation at both ends. Your own shapes now lean attacking or defensive by the roles you choose but have to give something to get something, and any you have already saved are re-scored when your career loads.",
   "5.6.4": "The player card, fixed. Tapping one of your own academy boys or a scouted prospect showed a Buy button — which could only fail — instead of his real options, because the buy panel was being written over the top of them. The same overwrite wiped the option to scout another club's player from his card, and from the Market screen too. The Buy button also ignored the transfer window; it now waits for the window like every other deal. And releasing a player is no longer free: ending a contract early means paying him half of what is left on it, so a signing on big wages can no longer just be dropped when he disappoints. A player whose contract has run down still costs nothing to let go.",
   "5.6.3": "More loopholes closed. Players you bought could be sold straight on for profit: other clubs bid about 15% over market for anyone you have not listed, priced in your division rather than the one you bought him from, so signing a man and waiting was free money. Nobody now bids for a player in his first half-season with you. A new coach or head of youth could be hired in the last week of the season, bank a full year's development at the rollover, and be let go in week one; staff now take half a season to have their full effect, and letting one go costs eight weeks' pay. Extending a contract with years left could cut a fading player's wages; it no longer can. And passing the captain's armband round the squad gave everyone a free morale boost — being stripped of it now stings as much as being handed it lifts.",
   "5.6.2": "Loopholes closed. A player who turned down a new deal could be asked again straight away until the refusal happened not to happen — he now won't talk terms for eight weeks. A ticket price set at a big club followed you down the divisions at several times the local rate; it now resets and is always held to your current club's range. New signings had no shirt number until you reloaded. A thirteen-year-old could be put straight into the first team; sixteen is now the minimum. Resigning a week before the sack cost you less than being sacked, so it is now read the same way. And a sold player kept your captaincy or penalty duty at his new club.",
@@ -5107,7 +5101,7 @@ function newCareer(clubId, customIdentity){
     boardObjective: null,
     freeAgents: [],
     offers: [],
-    pendingBids: [], futureDeals: [], conversations: [], captainId: null,
+    pendingBids: [], futureDeals: [], conversations: [],
     preSeason: null, awaitingPreSeason: true,
     tactics: defaultTactics(),
     lineup: null,
@@ -5705,6 +5699,25 @@ function runSeasonRollover(){
   if(loanedBack.length) pushNews("Loanees returned",
     loanedBack.map(l=>`${fullName(l.p)} is back from ${l.dest?l.dest.name:"his loan"}`).join(", "), "transfer");
 
+  // A points deduction punishes the season it was imposed in, not every season
+  // that follows. Nothing ever cleared it, so a club that went into
+  // administration carried the deduction for the rest of the game — and a
+  // second administration added to it permanently. Cleared here, at the end of
+  // the season, once promotion and relegation have been settled on the final
+  // table. Clubs also come out of administration rather than staying in it for
+  // ever.
+  try{
+    Object.values(CLUB_META).forEach(c=>{
+      if(c.pointsDeduction){
+        c.pointsDeduction = 0;
+        if(c.id === state.clubId)
+          pushNews("Points deduction served",
+            "The club's points deduction applied to last season only. You start the new one level with everyone else.", "board");
+      }
+      if(c.inAdministration) c.inAdministration = false;
+    });
+  }catch(e){ reportError("FIN-04", e, "clearing points deductions"); }
+
   // --- Squad ledger -------------------------------------------------------
   // Every arrival and departure, named and counted, so a squad can never
   // quietly shrink over the summer again. If the numbers don't reconcile the
@@ -5999,9 +6012,14 @@ function seedClubStature(){
     // Weight toward the division's level; a real squad still shows through, but
     // it can't make a promoted side the strongest club in the league.
     const blended = squadAvg*0.45 + expected*0.55;
-    // Newly promoted clubs start at the bottom end of their new division.
-    const promoBias = c.justPromoted ? -0.7 : 0;
-    c.stature = clamp(blended + promoBias + (c.eliteness||0)*1.2, 4, 18.6);
+    // (A promoted-club bias used to be applied here from a c.justPromoted flag
+    // that nothing ever set, so it could never fire. Promotion already nudges
+    // stature directly at the moment a club goes up, and this only runs when a
+    // career is created, so the line is gone rather than left looking live.)
+    // (A c.eliteness term used to be added here. Nothing in the game ever sets
+    // it on a club, so it was always zero — removed rather than left looking
+    // as though elite clubs got a boost.)
+    c.stature = clamp(blended, 4, 18.6);
   });
 }
 
@@ -6201,7 +6219,11 @@ function simulateShadowSeason(leagueId){
   const pool = Object.values(CLUB_META).filter(c=>c.hidden && c.shadowOf===leagueId);
   return pool.map(c=>({
     id: c.id,
-    score: clubStrength(c.id) + rnd(-4.5, 4.5) + (c.justRelegated ? 1.6 : 0), // parachute-payment effect
+    // Parachute payments run out. This bonus used to apply for as long as a
+    // club stayed down, so the same sides bounced back for ever and the lower
+    // leagues never refreshed.
+    score: clubStrength(c.id) + rnd(-4.5, 4.5) +
+      ((c.justRelegated && (state.season - (c.relegatedSeason ?? state.season)) <= 2) ? 1.6 : 0),
   })).sort((a,b)=>b.score-a.score);
 }
 
@@ -6228,6 +6250,7 @@ function runShadowPromotionRelegation(){
     goingDown.forEach(id=>{
       const c = CLUB_META[id];
       c.hidden = true; c.shadowOf = leagueId; c.justRelegated = true;
+      c.relegatedSeason = state.season;          // parachute money does not last for ever
       if(c.stature!==undefined) c.stature = clamp(c.stature-1.1, 4, 18.6); // squad quality follows the drop
       c.balance = Math.round(c.balance*0.55);   // revenue collapse on relegation
       c.capacity = Math.round(c.capacity*0.9);
@@ -7535,7 +7558,7 @@ const FORMATIONS = {
     roles:[["GK"],["LB","LWB"],["CB"],["CB"],["RB","RWB"],
            ["DM","CM"],["CM","CAM"],["CM","CAM"],
            ["LW","LM"],["ST","CF"],["RW","RM"]]},
-  "4-2-3-1": {gk:1, df:4, md:5, fw:1, attack:1.02, defense:1.06, desc:"Control the middle, one up top.",
+  "4-2-3-1": {gk:1, df:4, md:5, fw:1, attack:0.97, defense:1.06, desc:"Control the middle, one up top.",
     roles:[["GK"],["LB","LWB"],["CB"],["CB"],["RB","RWB"],
            ["DM","CM"],["DM","CM"],
            ["LW","LM"],["CAM","CM"],["RW","RM"],
@@ -7548,7 +7571,7 @@ const FORMATIONS = {
     roles:[["GK"],["LWB","LB"],["CB"],["CB"],["CB"],["RWB","RB"],
            ["DM","CM"],["CM","CAM"],["CM","DM"],
            ["ST","CF"],["ST","CF"]]},
-  "4-5-1":   {gk:1, df:4, md:5, fw:1, attack:0.88, defense:1.12, desc:"Contain and frustrate.",
+  "4-5-1":   {gk:1, df:4, md:5, fw:1, attack:0.88, defense:1.15, desc:"Contain and frustrate.",
     roles:[["GK"],["LB","LWB"],["CB"],["CB"],["RB","RWB"],
            ["LM","LW"],["CM","DM"],["DM","CM"],["CM","CAM"],["RM","RW"],
            ["ST","CF"]]},
@@ -7922,7 +7945,11 @@ function submitOffer(p, kind, fee, extras){
   const interest = kind === "loan" ? loanInterest(p, buyer) : joiningInterest(p, buyer);
   const wageAsk = playerWage(p, buyer.tier);
 
-  if(kind === "loan"){
+  // A loan with an option to buy IS a loan: he arrives on loan, and the option
+  // is a separate decision you take later. It used to run down the permanent
+  // route below and buy him outright on the spot, at a premium, with an
+  // "option" chip attached to a player who was already yours.
+  if(kind === "loan" || kind === "loanToBuy"){
     if(!transferWindowOpen()) return {ok:false, code:"WIN-02",
       reason:`Loans can only be agreed while the window is open. It reopens in ${weeksUntilWindow()} week${weeksUntilWindow()===1?"":"s"}.`};
     const lf = loanFee(p);
@@ -7956,7 +7983,14 @@ function submitOffer(p, kind, fee, extras){
 
     if(Math.random() > 0.55 + interest*0.4) return {ok:false, code:"OFR-05",
       reason:`${from.name} have rejected the loan approach.`};
-    return loanInPlayer(p);
+    const loaned = loanInPlayer(p);
+    if(loaned.ok && kind === "loanToBuy"){
+      const optionFee = fee || negotiatedFee(p, "loanToBuy");
+      p.optionToBuy = {fee: optionFee, fromClub: from.id};
+      pushNews("Option to buy",
+        `${fullName(p)} is on loan from ${from.name}, and you can make it permanent for ${fmtMoney(optionFee)} at any point before he goes back in the summer.`, "transfer");
+    }
+    return loaned;
   }
 
   // Permanent or loan-to-buy.
@@ -7988,7 +8022,6 @@ function submitOffer(p, kind, fee, extras){
   p.wage = agreedWage;
 
   p.clauses = (p.clauses||[]).concat(clauses.map(c=>Object.assign({}, c, {club: from.id})));
-  if(kind === "loanToBuy") p.clauses.push({type:"optionBuy", club: from.id, fee: Math.round(fee*0.9)});
   if(clauses.length){
     pushNews("Deal includes clauses",
       `${fullName(p)} signs for ${fmtMoney(fee)}. ` + clauses.map(c=>
@@ -7999,6 +8032,50 @@ function submitOffer(p, kind, fee, extras){
 }
 
 // Honour sell-on clauses when you later sell the player on.
+/* A buy-back lets the club that sold him reclaim him for a fee agreed at the
+   time. It was only ever written onto the player and shown on his card —
+   nothing acted on it. It now does, fairly: only in a transfer window, never
+   in his first half-season with you, and only once he has become a bargain at
+   that price. The fee was set at 1.6 to 2.6 times what you paid, so you make
+   money even as you lose him. */
+function buyBackIsLive(p){
+  const c = (p.clauses||[]).find(x=> x.type === "buyBack");
+  if(!c) return null;
+  const former = clubById(c.club);
+  if(!former || former.hidden) return null;
+  const value = playerAskingPrice(p, (clubById(state.clubId)||{}).tier);
+  if(value <= c.fee) return null;                    // not yet a bargain for them
+  const nowAbs = state.season * CALENDAR_WEEKS + state.week;
+  if(p.joinedAbs && nowAbs - p.joinedAbs < 20) return null;
+  return {clause:c, former, value};
+}
+function checkBuyBacks(){
+  if(!transferWindowOpen()) return [];
+  const myClub = clubById(state.clubId);
+  const done = [];
+  (state.squads[state.clubId] || []).slice().forEach(p=>{
+    if(p.loanedOutTo || p.loanedFrom) return;
+    const live = buyBackIsLive(p);
+    if(!live) return;
+    if(live.former.balance < live.clause.fee) return;
+    if(Math.random() > 0.25) return;                 // they take their time deciding
+    if(state.squads[live.former.id] && state.squads[live.former.id].length >= SQUAD_MAX) return;
+    const fee = live.clause.fee;
+    live.former.balance -= fee;
+    myClub.balance += fee;
+    p.clauses = [];
+    state.squads[state.clubId] = state.squads[state.clubId].filter(x=> x.id !== p.id);
+    p.clubId = live.former.id; p.listed = false; p.loanListed = false; p.agreedToLeave = false;
+    p.isCaptain = false; p.isViceCaptain = false; p.isPenTaker = false;
+    (state.squads[live.former.id] = state.squads[live.former.id] || []).push(p);
+    pushNews("Buy-back triggered",
+      `${live.former.name} have exercised their buy-back clause and taken ${fullName(p)} back for ${fmtMoney(fee)}.`, "transfer");
+    done.push(p);
+  });
+  if(done.length) saveState(true);
+  return done;
+}
+
 function applySellOn(p, fee){
   let net = fee;
   (p.clauses||[]).forEach(c=>{
@@ -8399,8 +8476,13 @@ function completeSale(p, buyer, fee, offer){
   if(buyer.balance < fee) return {ok:false, code:"OFR-14", reason:`${buyer.name} can no longer afford ${fmtMoney(fee)}.`};
   if(state.squads[buyer.id] && state.squads[buyer.id].length >= SQUAD_MAX)
     return {ok:false, code:"OFR-15", reason:`${buyer.name}'s squad is full.`};
-  myClub.balance += fee;
   buyer.balance -= fee;
+  // Former clubs holding a sell-on take their cut first. Every real sale comes
+  // through here, and it used to credit the whole fee — the one function that
+  // paid sell-ons was never called, so those clauses cost you nothing.
+  myClub.balance += applySellOn(p, fee);
+  // He has left: whatever clauses came with him when you bought him are settled.
+  p.clauses = [];
   state.squads[state.clubId] = (state.squads[state.clubId]||[]).filter(x=>x.id!==p.id);
   p.clubId = buyer.id; p.listed = false; p.loanListed = false; p.agreedToLeave = false;
   (state.squads[buyer.id] = state.squads[buyer.id] || []).push(p);
@@ -9478,7 +9560,6 @@ function setCaptain(playerId){
     // Vice-captain: next best leader.
     const vice = sq.filter(p=>p.id!==playerId).sort((a,b)=>captaincyRating(b)-captaincyRating(a))[0];
     if(vice) vice.isViceCaptain = true;
-    state.captainId = playerId;
   }
   saveState();
 }
@@ -9583,6 +9664,11 @@ function buildRoundSchedule(totalRounds){
 // Built into the user's own calendar so they're played by advancing the week.
 function schedulePreSeason(destId){
   const club = clubById(state.clubId);
+  // One tour a pre-season. Nothing stopped a second pick — a quick double tap
+  // on a destination fires this twice before the picker closes, and tapping two
+  // destinations banked two fees. The sponsorship deals already guard this way.
+  if(state.preSeason && state.preSeason.season === state.season && state.preSeason.chosen)
+    return state.preSeason;
   const dest = TOUR_DESTINATIONS.find(d=>d.id===destId) || TOUR_DESTINATIONS[TOUR_DESTINATIONS.length-1];
   const fee = tourFeeFor(dest, club);
   club.balance += fee;
@@ -9590,7 +9676,7 @@ function schedulePreSeason(destId){
   // Four friendlies across the pre-season weeks, leaving the last one clear.
   const weeks = [PRESEASON_START+1, PRESEASON_START+2, PRESEASON_START+3, PRESEASON_START+4];
   state.preSeason = {
-    dest: dest.id, name: dest.name, icon: dest.icon, fee, chosen: true,
+    dest: dest.id, name: dest.name, icon: dest.icon, fee, chosen: true, season: state.season,
     fixtures: opponents.map((oppId,i)=>({
       opp: oppId, week: weeks[i], played:false, hg:0, ag:0,
     })),
@@ -9669,45 +9755,13 @@ function buildTourFixtures(destId){
   return shuffleArr(pool).slice(0,4).map(c=>c.id);
 }
 
-function startPreSeason(destId){
-  const dest = TOUR_DESTINATIONS.find(d=>d.id===destId) || TOUR_DESTINATIONS[TOUR_DESTINATIONS.length-1];
-  const club = clubById(state.clubId);
-  const fee = tourFeeFor(dest, club);
-  club.balance += fee;
-  state.preSeason = {
-    dest: dest.id, name: dest.name, icon: dest.icon, fee,
-    opponents: buildTourFixtures(dest.id),
-    played: [], index: 0, done: false,
-  };
-  // Touring lifts sharpness and, abroad, the club's profile.
-  (state.squads[state.clubId]||[]).forEach(p=>{
-    p.condition = clamp((p.condition||100) + dest.fitness, 20, 100);
-  });
-  if(dest.reputation) club.stature = clamp((club.stature||9) + dest.reputation*0.02, 4, 18.6);
-  pushNews("Pre-season tour",
-    `${club.name} will spend pre-season in ${dest.name}, banking ${fmtMoney(fee)} in appearance fees. Four friendlies arranged.`, "board");
-  return state.preSeason;
-}
+/* startPreSeason() used to live here — an older version of schedulePreSeason
+   that also banked the tour fee. Nothing called it; had anything done so
+   alongside the real one, the fee would have been paid twice. */
 
-// Plays the next friendly. Results don't count, but sharpness and morale do.
-function playFriendly(){
-  const ps = state.preSeason;
-  if(!ps || ps.done) return null;
-  const oppId = ps.opponents[ps.index];
-  if(!oppId){ ps.done = true; return null; }
-  const opp = clubById(oppId);
-  const ctx = buildMatchContext(state.clubId, oppId, null, "friendly");
-  const {hg, ag} = simulateScore(state.squads[state.clubId], state.squads[oppId], ctx);
-  ps.played.push({opp:oppId, hg, ag});
-  ps.index++;
-  if(ps.index >= ps.opponents.length) ps.done = true;
-
-  (state.squads[state.clubId]||[]).forEach(p=>{
-    p.condition = clamp((p.condition||100) - rndInt(3,8), 20, 100);
-    if(hg > ag) p.morale = clamp(p.morale + 1, 1, 20);
-  });
-  return {opp, hg, ag, ctx, remaining: ps.opponents.length - ps.index};
-}
+/* playFriendly() removed: it read the data shape of the old startPreSeason
+   (opponents/index), which no longer exists, and would have thrown if called.
+   Friendlies are played by playPreSeasonFixture() via preSeasonFixtureThisWeek(). */
 
 /* ---- Pre-season briefings ----
    The reminders a manager would actually get before a campaign starts.       */
@@ -9837,7 +9891,11 @@ function acceptNamingRights(offer){
   state.namingOffers = [];          // one ground, one name
   club.stadiumName = offer.brand;
   club.namingDeal = {brand:offer.brand, years:offer.years, perYear:offer.perYear, since:state.season};
-  club.balance += offer.upfront;
+  // The upfront sum AND this season's money. The yearly payment counts down
+  // before it pays, so paying only the upfront here left the deal one season
+  // short of what it promised — the kit sponsor already pays season one on
+  // signing.
+  club.balance += offer.upfront + offer.perYear;
   pushNews("Stadium renamed",
     `The ground will be known as the ${offer.brand} for the next ${offer.years} years, worth ${fmtMoney(offer.perYear)} a season plus ${fmtMoney(offer.upfront)} up front.`, "board");
   saveState();
@@ -10589,6 +10647,31 @@ function loanInPlayer(player){
 }
 
 // Called at rollover: every loanee returns to his parent club.
+/* Taking up an option to buy: the loanee becomes yours for the fee agreed
+   when the loan was struck. It is a deal already done, so it can be completed
+   at any point during the loan, not only in a window. */
+function exerciseLoanOption(playerId){
+  const club = clubById(state.clubId);
+  const p = (state.squads[club.id] || []).find(x=> x.id === playerId);
+  if(!p || !p.optionToBuy || !p.loanedFrom) return {ok:false, reason:"There's no option to take up on him."};
+  if(club.transferEmbargo) return {ok:false, reason:"The club is under a transfer embargo."};
+  const fee = p.optionToBuy.fee;
+  if(club.balance < fee) return {ok:false, reason:`Making it permanent costs ${fmtMoney(fee)} — more than the club has.`};
+  const parent = clubById(p.loanedFrom);
+  club.balance -= fee;
+  if(parent) parent.balance += fee;
+  p.loanedFrom = null;
+  p.optionToBuy = null;
+  p.contractYears = defaultContractYears(p);
+  p.wage = wageDemand(p);                                  // full terms now, not the loan share
+  p.renewalHandled = null;
+  p.joinedAbs = state.season * CALENDAR_WEEKS + state.week;
+  pushNews("Loan made permanent",
+    `${fullName(p)} has signed permanently from ${parent?parent.name:"his club"} for ${fmtMoney(fee)}.`, "transfer");
+  saveState(true);
+  return {ok:true, fee, from:parent};
+}
+
 function returnLoanees(){
   const returned = [];
   Object.keys(state.squads).forEach(clubId=>{
@@ -10598,6 +10681,10 @@ function returnLoanees(){
       if(!p.loanedFrom) continue;
       const parentId = p.loanedFrom;
       p.loanedFrom = null;
+      // An option not taken up lapses, and he goes back on his full wage — the
+      // loan share used to stick to him for good.
+      p.optionToBuy = null;
+      p.wage = wageDemand(p);
       if(!state.squads[parentId]){ continue; }   // parent club vanished somehow; keep him
       sq.splice(i,1);
       p.clubId = parentId;
@@ -10728,19 +10815,9 @@ const EURO_COMPS = {
 const EURO_LEAGUE_WEEKS = [10,13,15,18,20,22,24,28];
 const EURO_KO_WEEKS = {playoff:31, r16:34, qf:39, sf:43, final:47};
 
-// UEFA-style allocation: the strongest associations get four Champions League
-// places, the next tier two or three, and so on down to a single entrant for
-// the smallest. Everyone also gets Europa and Conference places. This replaces
-// the old flat "4/2/1 for everyone" which handed Scotland the same as Spain.
-function euroSlotsFor(nationId){
-  const n = NATIONS[nationId];
-  const rank = n ? n.coeff : 30;
-  if(rank <= 4)  return {ucl:4, uel:2, uecl:1};   // England, Spain, Italy, Germany
-  if(rank <= 6)  return {ucl:3, uel:2, uecl:1};   // France, Netherlands
-  if(rank <= 10) return {ucl:2, uel:2, uecl:1};   // Portugal, Belgium, Scotland, Turkey
-  if(rank <= 15) return {ucl:2, uel:1, uecl:1};
-  return {ucl:1, uel:1, uecl:2};                   // smallest associations
-}
+// European places come from the EURO_SLOTS table, which is graded by
+// association and totals exactly 36 per competition with the cup places. An
+// earlier euroSlotsFor() helper was superseded by it and never used; removed.
 
 function qualifyForEurope(){
   // Real qualification. Each nation's places are filled strictly by final league
@@ -11185,11 +11262,30 @@ function commitMatchStats(homeId, awayId, hg, ag, detail){
 }
 
 // Ticks down injuries/suspensions everywhere, once per matchweek.
+/* Which clubs actually have a game this week. A suspension is served in
+   matches, not on the calendar. */
+function clubsWithFixtureThisWeek(){
+  const playing = new Set();
+  const week = state.week;
+  Object.keys(state.tiers || {}).forEach(tid=>{
+    const lg = state.tiers[tid];
+    if(!lg || !lg.fixtures) return;
+    lg.fixtures.forEach(f=>{ if(f.week === week){ playing.add(f.home); playing.add(f.away); } });
+  });
+  return playing;
+}
+
 function tickAvailability(){
+  // An injury heals with time, so it counts down every week. A ban does not:
+  // it is served by missing a game. Counting both down on the calendar meant a
+  // suspended player could sit out an international break and miss nothing at
+  // all, which made a booking or a sending-off cost you nothing.
+  const playing = clubsWithFixtureThisWeek();
   Object.keys(state.squads).forEach(clubId=>{
+    const hadGame = playing.has(clubId);
     state.squads[clubId].forEach(p=>{
       if(p.injuryWeeks>0) p.injuryWeeks--;
-      if(p.suspensionWeeks>0) p.suspensionWeeks--;
+      if(hadGame && p.suspensionWeeks>0) p.suspensionWeeks--;
     });
   });
 }
@@ -11524,12 +11620,15 @@ function weeklyWageBill(clubId){
 
 /* How strong a nation is decides how good you must be to get in. Playing for
    Brazil is a different proposition to playing for Wales. */
+/* On the 0-100 scale ratingOf() returns — NOT the internal 1-20 one. Written
+   on the wrong scale these read 16.5 and 12.8, which every professional in the
+   game clears, so every player was capped at every international break. */
 const NATION_CAP_BAR = {
-  Brazilian:16.5, French:16.5, Spanish:16.2, German:16.0, Argentine:16.0,
-  English:15.8, Portuguese:15.5, Italian:15.5, Dutch:15.0, Belgian:14.8,
-  Welsh:12.8, Scottish:13.0, Irish:13.0, "Northern Irish":12.2,
+  Brazilian:87, French:87, Spanish:86, German:85, Argentine:85,
+  English:84, Portuguese:83, Italian:83, Dutch:82, Belgian:81,
+  Scottish:75, Irish:75, Welsh:74, "Northern Irish":72,
 };
-function capBarFor(nat){ return NATION_CAP_BAR[nat] || 13.5; }
+function capBarFor(nat){ return NATION_CAP_BAR[nat] || 78; }
 
 /* Is he in his country's thinking this week? */
 function deservesCallUp(p){
@@ -11537,8 +11636,9 @@ function deservesCallUp(p){
   if(p.age < 16) return false;
   const bar = capBarFor(p.nat);
   // A young player of real promise gets looked at earlier than his rating
-  // alone would suggest, the way an emerging talent does.
-  const youthLift = p.age <= 21 ? 0.8 : 0;
+  // alone would suggest, the way an emerging talent does. Three points on the
+  // 0-100 scale, not the 0.8 of the internal one this was first written for.
+  const youthLift = p.age <= 21 ? 3 : 0;
   return (ratingOf(p) + youthLift) >= bar;
 }
 
@@ -11555,7 +11655,11 @@ function runInternationalBreak(){
     p.lastCapSeason = state.season;
     // Playing for your country is a lift, and a tiring one.
     p.morale = clamp((p.morale || 12) + (first ? 3 : 1), 1, 20);
-    if(typeof p.fatigue === "number") p.fatigue = clamp(p.fatigue + 6, 0, 100);
+    // Fitness is p.condition, where 100 is fresh — there is no "fatigue" field,
+    // and tiring a man means taking condition off him, not adding to it.
+    // Written the wrong way round against a field that does not exist, this
+    // silently never ran: a week away with his country cost a player nothing.
+    p.condition = clamp((p.condition === undefined ? 100 : p.condition) - 6, 20, 100);
     // Forwards and midfielders occasionally get on the scoresheet.
     if((p.pos === "FW" || p.pos === "MD") && Math.random() < 0.18) p.intGoals = (p.intGoals || 0) + 1;
     capped.push({player:p, first});
@@ -11670,17 +11774,9 @@ function buyPlayer(player, overridePrice){
   return {ok:true, price};
 }
 
-function sellPlayer(player){
-  const club = clubById(state.clubId);
-  const gross = playerAskingPrice(player, club.tier);
-  const price = applySellOn(player, gross);   // former clubs take their cut first
-  club.balance += price;
-  state.squads[club.id] = state.squads[club.id].filter(p=>p.id!==player.id);
-  pushNews("Player sold", `${fullName(player)} has left the club for ${fmtMoney(price)}.`, "transfer");
-  checkAchievements({soldPlayer:true, soldFee:price});
-  saveState();
-  return price;
-}
+/* sellPlayer() used to live here: it sold a player at asking price to no club
+   at all, deleting him from the game. Nothing called it, but it was a trap —
+   every real sale goes through completeSale(), which now honours clauses. */
 
 /* What it costs to cancel a man's contract. Releasing used to be free, which
    made every contract meaningless: sign a player on big wages, and if he
@@ -12622,19 +12718,20 @@ const ERROR_AREAS = {
   "SEA-01":"End-of-season rollover", "SEA-02":"Promotion and relegation",
   "SEA-03":"Youth intake", "SEA-04":"Awards",
   "TRF-01":"Making an offer", "TRF-02":"Loan move", "TRF-03":"Contract renewal",
-  "FIN-01":"Weekly finances", "FIN-02":"Wage budget", "FIN-03":"Finance warnings",
+  "FIN-01":"Weekly finances", "FIN-02":"Wage budget", "FIN-03":"Finance warnings", "FIN-04":"Points deductions",
   "SAV-01":"Saving your career", "SAV-02":"Loading your career",
   "DAT-01":"Player data",
   "SYS-01":"Uncaught script error", "SYS-02":"Background task failed",
   "SYS-03":"Diagnostic copy", "USR-01":"Player-reported problem",
   "SAV-03":"Save migration", "SAV-04":"Career export", "SAV-05":"Career import",
+  "SAV-06":"Player id counter", "SAV-07":"Shirt numbers",
   "DAT-02":"Career self check", "SCT-01":"Scouting", "TRN-01":"Position training", "REC-01":"Club records", "SMK-01":"Screen smoke test", "ACT-01":"Action list", "ACT-02":"Action decision",
   "BOOT-04":"Loading the active slot", "SEL-01":"Team selection",
-  "SQD-01":"Squad ledger — unexplained departure", "SQD-02":"Squad ledger", "SQD-03":"Squad roles",
+  "SQD-01":"Squad ledger — unexplained departure", "SQD-02":"Squad ledger", "SQD-03":"Squad roles", "TAC-01":"Custom formations",
   "YTH-01":"Youth scouting", "YTH-02":"Youth intake report", "STF-01":"Backroom staff", "INT-01":"International break",
   "SCT-02":"Club scouting network", "SCT-03":"Seasonal club scouting",
   "SIM-05":"Penalty shootout", "TRF-10":"Settling agreed deals",
-  "TRF-14":"Transfer market maintenance",
+  "TRF-14":"Transfer market maintenance", "TRF-15":"Buy-back clauses",
 };
 
 /* =========================================================================
@@ -14414,7 +14511,7 @@ function openMarketModal(p, kind, price){
     </div>
     <button class="btn-primary" id="offBuy" style="margin-top:4px;">Bid ${fmtMoney(askBuy)}</button>
     <button class="btn-secondary" id="offLoan">Loan for the season (${fmtMoney(lFee)})</button>
-    <button class="btn-secondary" id="offL2B">Loan with option to buy (${fmtMoney(askL2B)})</button>
+    <button class="btn-secondary" id="offL2B">Loan with option to buy — ${fmtMoney(lFee)} now, ${fmtMoney(askL2B)} to keep him</button>
     <div class="range-pair" style="margin-top:12px;">
       <span style="font-size:11.5px; color:var(--text-dim); white-space:nowrap;">Your bid</span>
       <input type="range" id="bidSlider" min="${Math.round(askBuy*0.5)}" max="${Math.round(askBuy*1.8)}" value="${askBuy}" step="${Math.max(1000,Math.round(askBuy/80))}">
@@ -14448,7 +14545,7 @@ function openMarketModal(p, kind, price){
   };
   document.getElementById("offL2B").onclick = ()=>{
     const r = submitOffer(p, "loanToBuy", askL2B);
-    if(r.ok){ closePlayerModal(); toast(`${fullName(p)} joins with an option to buy`); render(); } else fail(r);
+    if(r.ok){ closePlayerModal(); toast(`${fullName(p)} joins on loan — you can make it permanent for ${fmtMoney(askL2B)}`); render(); } else fail(r);
   };
   addScoutingPanel(area, p);
 }
@@ -15127,7 +15224,22 @@ function openPlayerModal(p, isOwn){
   else if(!isOwn) addScoutingPanel(actionArea, p);
   if(isOwn){
     if(p.loanedFrom){
-      actionArea.innerHTML = `<div class="empty-hint" style="padding:14px;">On loan from ${clubById(p.loanedFrom)?clubById(p.loanedFrom).name:"another club"} — returns at the end of the season.</div>`;
+      const parentName = clubById(p.loanedFrom) ? clubById(p.loanedFrom).name : "another club";
+      const opt = p.optionToBuy;
+      actionArea.innerHTML = opt
+        ? `<div class="renew-row">
+             <div class="renew-name">On loan with an option to buy</div>
+             <div class="renew-meta">From ${parentName}. Make it permanent for ${fmtMoney(opt.fee)} any time before the summer, or he goes back.</div>
+             <div class="renew-acts"><button class="btn-secondary" id="optBuyBtn">Make it permanent — ${fmtMoney(opt.fee)}</button></div>
+           </div>`
+        : `<div class="empty-hint" style="padding:14px;">On loan from ${parentName} — returns at the end of the season.</div>`;
+      const optBtn = document.getElementById("optBuyBtn");
+      if(optBtn) optBtn.onclick = ()=>{
+        playClickSound();
+        const r = exerciseLoanOption(p.id);
+        toast(r.ok ? `${fullName(p)} signs permanently for ${fmtMoney(r.fee)}` : r.reason, 3600);
+        if(r.ok){ closePlayerModal(); render(); }
+      };
     } else {
       const yrsLeft = (p.contractYears === undefined) ? defaultContractYears(p) : p.contractYears;
       const ask = wageDemand(p);
@@ -15728,6 +15840,7 @@ async function advanceWeek(){
   }
 
   try{ settleAgreedDeals(); }catch(e){ reportError("TRF-10", e, "settling agreed deals"); }
+  try{ checkBuyBacks(); }catch(e){ reportError("TRF-15", e, "buy-back clauses"); }
   try{ tickScouting(); }catch(e){ reportError("SCT-01", e, "scouting"); }
   try{ tickYouthScouting(); }catch(e){ reportError("YTH-01", e, "youth scouting"); }
   try{ tickPositionTraining(); }catch(e){ reportError("TRN-01", e, "position training"); }
@@ -16077,6 +16190,7 @@ function playMatchDay(fixture, label, detail){
     const iAmHome = fixture.home === state.clubId;
     const mySide = iAmHome ? "home" : "away";
     let subsUsed = 0;
+    state._subbedOff = [];    // nobody has been taken off yet in this match
     let changed = false;      // has the manager altered anything?
 
     const mgrRow = document.getElementById("mgrRow");
@@ -16799,7 +16913,19 @@ function backfillState(){
   state.matchHistory = Array.isArray(state.matchHistory) ? state.matchHistory : [];
   // Shirt numbers for a save made before they existed, and for anyone who has
   // arrived since without one.
-  try{ Object.keys(state.squads || {}).forEach(cid=> assignSquadNumbers(cid)); }catch(e){}
+  try{ Object.keys(state.squads || {}).forEach(cid=> assignSquadNumbers(cid)); }
+  catch(e){ reportError("SAV-07", e, "shirt numbers"); }
+  // Custom formations saved under the old scoring kept numbers that beat the
+  // built-in shapes at both ends. Re-score every one from its roles so an
+  // existing career is on the same footing as a new one.
+  try{
+    Object.keys(state.customFormations || {}).forEach(name=>{
+      const def = state.customFormations[name];
+      const roles = (def && def.roles || []).map(r=> Array.isArray(r) ? r[0] : r);
+      const fresh = makeCustomFormation(roles);
+      if(fresh.ok){ def.attack = fresh.def.attack; def.defense = fresh.def.defense; }
+    });
+  }catch(e){ reportError("TAC-01", e, "re-scoring custom formations"); }
   state.freeAgents = state.freeAgents||[]; state.offers = state.offers||[];
   state.transferRequests = state.transferRequests||[]; state.jobOffers = state.jobOffers||[];
   state.sackPressure = state.sackPressure||0; state.pendingCupGate = state.pendingCupGate||0;
@@ -16828,7 +16954,9 @@ function backfillState(){
   };
   // Before anything creates a player, make sure new ids cannot collide with
   // ones already in this save.
-  try{ syncPidCounter(); }catch(e){}
+  // If this ever fails, new players can be handed ids that already exist and
+  // the save quietly corrupts — so it reports rather than passing in silence.
+  try{ syncPidCounter(); }catch(e){ reportError("SAV-06", e, "player id counter"); }
   try{ ensureKeepers(); }catch(e){ reportError("SAV-02", e, "keepers"); }
   // Detailed positions arrived after these saves were written.
   Object.keys(state.squads||{}).forEach(cid=>{
@@ -16836,7 +16964,12 @@ function backfillState(){
   });
   (state.freeAgents||[]).forEach(p=>{ if(p && !p.pos2) p.pos2 = derivePosition(p); });
 
-  rebuild("coefficients", !state.coefficients, initCoefficients);
+  // The field is state.coeff. Tested against "state.coefficients", which never
+  // exists, this was always true — so every nation's UEFA coefficients were
+  // re-seeded from scratch on every load AND after every season rollover,
+  // destroying the points they had just earned. Countries could never rise or
+  // fall, which is the whole point of keeping a five-year history.
+  rebuild("coefficients", !state.coeff, initCoefficients);
   rebuild("cups", !state.cups || typeof state.cups !== "object", initCupsForSeason);
   rebuild("natCups", !state.natCups || typeof state.natCups !== "object", initNationalCups);
   rebuild("euro", !state.euro || typeof state.euro !== "object", initEuroForSeason);
@@ -17000,6 +17133,31 @@ function collectActions(){
   const sq = squadOf();
   const club = clubById(state.clubId);
   if(!club) return acts;
+
+  // --- Buy-backs that could be triggered --------------------------------
+  (state.squads[club.id] || []).forEach(p=>{
+    const live = buyBackIsLive(p);
+    if(!live) return;
+    acts.push({group:"Transfers", icon:"\u26A0\uFE0F",
+      title:`${live.former.name} could buy back ${fullName(p)}`,
+      sub:`He is now worth ${fmtMoney(live.value)}; their buy-back is ${fmtMoney(live.clause.fee)}. They can take him in any open window.`,
+      go:"squad", player:p.id, buttons:[]});
+  });
+
+  // --- Loans with an option to buy -------------------------------------
+  // Without a reminder the option would only be found by opening his card,
+  // and it lapses silently at the end of the season.
+  (state.squads[club.id] || []).filter(p=> p.loanedFrom && p.optionToBuy).forEach(p=>{
+    const from = clubById(p.loanedFrom);
+    acts.push({group:"Transfers", icon:"\uD83D\uDD01",
+      title:`Option to buy ${fullName(p)}`,
+      sub:`On loan from ${from?from.name:"his club"} · permanent for ${fmtMoney(p.optionToBuy.fee)} · lapses when the season ends`,
+      go:"squad", player:p.id,
+      buttons:[{label:"Make it permanent", run:()=>{
+        const r = exerciseLoanOption(p.id);
+        return r.ok ? `${fullName(p)} signs permanently for ${fmtMoney(r.fee)}` : r.reason;
+      }}]});
+  });
 
   // --- Academy boys who have turned eighteen ---------------------------
   if(typeof academyDecisionsDue === "function"){
@@ -19522,14 +19680,34 @@ function makeCustomFormation(roles){
   // Count the actual roles rather than treating every midfielder/forward as
   // identical: DMs protect the back line, wide players add attacking width,
   // and extra strikers add threat but also leave space behind them.
-  const cb = roles.filter(r=>r === "CB").length;
-  const fullbacks = roles.filter(r=>["LB","RB","LWB","RWB"].includes(r)).length;
-  const dms = roles.filter(r=>r === "DM").length;
-  const wideAttack = roles.filter(r=>["LW","RW","LM","RM"].includes(r)).length;
-  const cams = roles.filter(r=>r === "CAM").length;
-  const strikers = roles.filter(r=>["ST","CF"].includes(r)).length;
-  const attack = clamp(0.96 + strikers*0.018 + wideAttack*0.008 + cams*0.012 - Math.max(0,strikers-2)*0.015, 0.91, 1.10);
-  const defense = clamp(0.98 + cb*0.018 + fullbacks*0.006 + dms*0.022 - Math.max(0,strikers-2)*0.028, 0.91, 1.10);
+  // Raw scoring from the roles: what each kind of player adds at either end.
+  const scoreRoles = rs=>{
+    const cb = rs.filter(r=>r === "CB").length;
+    const fullbacks = rs.filter(r=>["LB","RB","LWB","RWB"].includes(r)).length;
+    const dms = rs.filter(r=>r === "DM").length;
+    const wideAttack = rs.filter(r=>["LW","RW","LM","RM"].includes(r)).length;
+    const cams = rs.filter(r=>r === "CAM").length;
+    const strikers = rs.filter(r=>["ST","CF"].includes(r)).length;
+    return {
+      a: clamp(0.96 + strikers*0.018 + wideAttack*0.008 + cams*0.012 - Math.max(0,strikers-2)*0.015, 0.91, 1.10),
+      d: clamp(0.98 + cb*0.018 + fullbacks*0.006 + dms*0.022 - Math.max(0,strikers-2)*0.028, 0.91, 1.10),
+    };
+  };
+  /* A shape has to give something to get something, exactly as every built-in
+     does. Scored independently, stacking holding midfielders raised defence at
+     no cost to attack: more than half of all possible home-made shapes beat a
+     named formation at BOTH ends, and the strongest out-muscled every one the
+     game ships with. So the roles now decide only how attacking or defensive a
+     shape LEANS, measured against a plain 4-4-2 (which therefore lands exactly
+     on 1.00/1.00 like the built-in one), and the total is held to a 4-4-2's
+     budget — no custom shape can be stronger at both ends than a named one.
+     The lean is scaled so the most extreme shapes reach roughly the built-ins'
+     own spread rather than all bunching up near neutral. */
+  const mine = scoreRoles(roles);
+  const ref  = scoreRoles(["GK","LB","CB","CB","RB","LM","CM","CM","RM","ST","ST"]);
+  const lean = ((mine.a - ref.a) - (mine.d - ref.d)) * 1.47;
+  const attack  = clamp(1 + lean / 2, 0.86, 1.14);
+  const defense = clamp(1 - lean / 2, 0.86, 1.14);
 
   return {ok:true, name, def:{
     gk:1, df, md, fw, attack, defense,
@@ -20101,6 +20279,15 @@ function makeSubstitution(offId, onId){
   if(!isAvailable(on)) return {ok:false, reason:`${fullName(on)} isn't available.`};
   const idx = (state.lineup || []).indexOf(offId);
   if(idx === -1) return {ok:false, reason:`${fullName(off)} isn't on the pitch.`};
+  // He cannot come on if he is already playing — doing so put him in the side
+  // twice and quietly removed the man he replaced.
+  if(state.lineup.indexOf(onId) !== -1) return {ok:false, reason:`${fullName(on)} is already on the pitch.`};
+  // And a substituted player cannot return. The bench is simply "anyone not in
+  // the eleven", so a man taken off reappeared as an option to bring back on.
+  state._subbedOff = state._subbedOff || [];
+  if(state._subbedOff.indexOf(onId) !== -1)
+    return {ok:false, reason:`${fullName(on)} has already been substituted.`};
+  state._subbedOff.push(offId);
   state.lineup[idx] = onId;
   return {ok:true, off, on};
 }
