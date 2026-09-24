@@ -4540,11 +4540,13 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "5.8.1";
+const GAME_VERSION = "5.8.3";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
 const VERSION_NOTES = {
+  "5.8.3": "No fixes needed this time — the match engine and the injury model were checked against real football and both hold up, so they are now protected against being broken by a later change. Between two equal sides the home team wins 45 in 100, a quarter are drawn, and there are three goals a game; the real thing is about 45, 25 and 2.7. A typical injury is four weeks, and a career is only ever ended by a very long lay-off to a player past thirty, which happens to well under one in a hundred of them.",
+  "5.8.2": "A club could be drawn against itself in the play-offs. The National League play-off has six teams, which leaves three winners after the first round — and pairing an odd number straight across put one club against itself. The side that finished highest now gets a bye instead, as a bye always works, and the report says he sat out rather than showing a match against nobody. Promotion and relegation were also checked across the whole pyramid: three down from the Premier League, three up and three down in the Championship, three up and four down in League One, four up and two down in League Two, and so on — every level balances exactly, so league sizes hold however long you play.",
   "5.8.1": "In League One and League Two a result could appear that you were never told about. Those divisions have 24 clubs, which means 46 rounds squeezed into 42 weeks, so four weeks carry a midweek game as well — and on those weeks your second fixture was simulated with no word of it and no team selection. It is still your assistant who takes the midweek game, but he now reports it, with the score and who it was against.",
   "5.8.0": "The laws of the game, enforced properly. A suspension counted down on the calendar rather than in matches, so a banned player could sit out an international break and miss nothing at all — a booking or a sending-off cost you nothing. A ban is now served by missing a game; injuries still heal with time, as they should. During a match you could also bring on a player who was already on the pitch, which put him in the side twice and quietly removed a teammate, or bring back a player you had already substituted. Neither is possible now. Five bookings still earn a one-match ban, a red card one to three, and five substitutions are allowed.",
   "5.7.3": "Every player in your squad was being capped by his country. The standard you had to reach was written on the game's internal rating scale instead of the one shown on a player's card, so the bar sat far below any professional and the whole squad went away at every international break. The bars now sit where they should — around 87 for Brazil or France, 74 for Wales — so a call-up means something again, and an emerging under-21 is still looked at a little earlier.",
@@ -5415,8 +5417,18 @@ function resolvePlayoffBracket(seeds, tierId){
   const rounds = [];
   while(remaining.length > 1){
     const next = [], ties = [];
-    for(let i=0; i<remaining.length/2; i++){
-      const high = remaining[i], low = remaining[remaining.length-1-i];
+    // An odd number left means somebody sits out, and it is the side that
+    // finished highest — as a bye always is. Pairing straight across an odd
+    // list put remaining[i] against itself: a six-team play-off, which is what
+    // the National League uses, produced a club playing itself in round two.
+    let pool = remaining.slice();
+    if(pool.length % 2 === 1){
+      const bye = pool.shift();
+      next.push(bye);
+      ties.push({high: bye, low: null, winner: bye, bye: true});
+    }
+    for(let i=0; i<pool.length/2; i++){
+      const high = pool[i], low = pool[pool.length-1-i];
       const winner = simulateOneOff(high, low);
       ties.push({high, low, winner});
       next.push(winner);
@@ -18357,6 +18369,12 @@ function showPlayoffReport(){
     return `<div class="act-group">${label}</div>` + ties.map(t=>{
       const hi = clubById(t.high), lo = clubById(t.low);
       const hiW = t.winner === t.high;
+      // A bye is not a match: showing it as "Club v —" reads like they played
+      // nobody. The highest side left sits the round out.
+      if(t.bye) return `<div class="po-tie">
+        <span class="w">${(hi&&hi.name)||"—"}${t.high===state.clubId?" (you)":""}</span>
+        <span style="color:var(--text-dim); font-size:11px;">sat out — through to the next round</span>
+      </div>`;
       return `<div class="po-tie">
         <span class="${hiW?"w":"l"}">${(hi&&hi.name)||"—"}${t.high===state.clubId?" (you)":""}</span>
         <span style="color:var(--text-dim); font-size:11px;">v</span>
