@@ -4540,11 +4540,18 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "5.8.3";
+const GAME_VERSION = "5.9.3";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
 const VERSION_NOTES = {
+  "5.9.3": "Following through on the last change: every club tiring could have made the whole game easier if rival clubs simply played the same eleven into the ground. They do not — team selection already weighs a player's fitness as well as his ability, so a tired man drops down the pecking order and clubs rotate on their own. Over a season both you and your opponents settle at much the same level of freshness, and a squad spreads out the way a real one does. The extra work costs under two thousandths of a second a week, so advancing a week is no slower.",
+  "5.9.2": "You were the only club in the game that got tired. Match fitness cost a weary side up to an eighth of its strength — but only yours ever lost condition, so every opponent played at full freshness all season while you carried a handicap nobody else did, and rotating your squad was fighting a problem no rival had. Every club now tires and recovers the same way you do, judged on the side it would actually field, so squad rotation matters for your opponents too. Shadow-league clubs that are not simulated are left alone.",
+  "5.9.1": "Correcting 5.9.0, which had this the wrong way round and would have counted your cup goals twice. What was actually wrong: in the English cups and the European league phase, ties between other clubs recorded no appearances or goals at all, while your own were recorded in full — so your players climbed the scoring chart on goals nobody else was credited with. Those ties now count for other clubs too, and your own are still recorded once, through the match report. The chart also now says it counts all competitions, which it does.",
+  "5.9.0": "Your players got nothing from cup runs and European nights. Any tie your club was involved in recorded no appearances and no goals for either side, while ties between other clubs recorded them in full — so everyone else's cup goals counted toward the scoring charts and yours did not, and a squad player who featured mainly in the cups looked as though he had barely played, which counts against him when he considers retiring. The English cups recorded nothing for anybody at all, and European league nights the same. Every competition now counts, for every club, with a bye still counting as no game.",
+  "5.8.6": "Four games a season were missing from your record in League One and League Two. The midweek game your assistant takes gave the players their appearances and goals, but never counted toward your own won-drawn-lost, your goals for and against, or your career games — and a defeat in one did not end an unbeaten run, so a run could survive a loss and win you something you had not earned. Those games now count in every respect.",
+  "5.8.5": "Nothing needed changing this time: the board were checked over and judge you fairly, so that is now protected against being broken later. Your target is set from how strong your squad is against the rest of the division, so it is never one a weaker side could not reach — top two if you have the best squad, survival if you have the worst. Meeting it exactly keeps the board content. They pass no judgement at all in your first twelve games, a good run wipes out any pressure, you get a clear warning long before anything happens, and even at rock bottom it takes eleven further weeks to be sacked. Taking a new job always starts you with a clean slate.",
+  "5.8.4": "Club records followed you when you changed jobs. They were kept in one place rather than against each club, so after taking over somewhere new the Club records page showed feats set at your previous club. Records now belong to the club where they were set, each club keeps its own, and an existing career has its records filed against whichever club they were achieved at when you next load it. Also checked and found right: the season scoring chart really is per season — goals, appearances, assists and clean sheets all reset each summer, with career totals kept separately.",
   "5.8.3": "No fixes needed this time — the match engine and the injury model were checked against real football and both hold up, so they are now protected against being broken by a later change. Between two equal sides the home team wins 45 in 100, a quarter are drawn, and there are three goals a game; the real thing is about 45, 25 and 2.7. A typical injury is four weeks, and a career is only ever ended by a very long lay-off to a player past thirty, which happens to well under one in a hundred of them.",
   "5.8.2": "A club could be drawn against itself in the play-offs. The National League play-off has six teams, which leaves three winners after the first round — and pairing an odd number straight across put one club against itself. The side that finished highest now gets a bye instead, as a bye always works, and the report says he sat out rather than showing a match against nobody. Promotion and relegation were also checked across the whole pyramid: three down from the Premier League, three up and three down in the Championship, three up and four down in League One, four up and two down in League Two, and so on — every level balances exactly, so league sizes hold however long you play.",
   "5.8.1": "In League One and League Two a result could appear that you were never told about. Those divisions have 24 clubs, which means 46 rounds squeezed into 42 weeks, so four weeks carry a midweek game as well — and on those weeks your second fixture was simulated with no word of it and no team selection. It is still your assistant who takes the midweek game, but he now reports it, with the score and who it was against.",
@@ -7153,14 +7160,17 @@ function advanceNationalCup(nationId){
     const res = resolveCupTie(a,b);
     winners.push(res.winner);
     if(!res.bye){
+      // A tie of YOURS is committed in full by commitMatchStats (both clubs),
+      // so recording it here as well would count every goal twice.
+      if(a!==state.clubId && b!==state.clubId){
+        recordQuickStats(a, res.hg, res.ag);
+        recordQuickStats(b, res.ag, res.hg);
+      }
       if(a===state.clubId || b===state.clubId){
         // Prize money scales with how far you've gone.
         const prize = Math.round(40000 * Math.pow(2.1, cup.round));
         clubById(state.clubId).balance += prize;
         userTie = {a, b, hg:res.hg, ag:res.ag, prize, round:cup.round};
-      } else {
-        recordQuickStats(a, res.hg, res.ag);
-        recordQuickStats(b, res.ag, res.hg);
       }
     }
   });
@@ -9125,12 +9135,30 @@ function applyFatigue(clubId, hadFixture){
 }
 
 // A tired XI genuinely underperforms.
+/* The same week's work for a club you are not managing. applyFatigue() leans on
+   selectStartingXI and the club's training facilities exactly as it does for
+   you; this is simply the version that runs for everyone else, called once a
+   week for the clubs that had a game and the clubs that did not. */
+function applyAIFatigue(playingIds){
+  Object.keys(state.squads || {}).forEach(cid=>{
+    if(cid === state.clubId) return;                 // yours is handled already
+    const club = clubById(cid);
+    if(!club || club.hidden) return;                 // shadow-league clubs are not simulated
+    applyFatigue(cid, playingIds.has(cid));
+  });
+}
+
 function fatigueMultiplier(clubId){
   const sq = state.squads[clubId];
   if(!sq || !sq.length) return 1;
   // Only the players actually taking part should determine match fitness.
   // AI clubs remain neutral here because they do not expose a managed XI.
-  const xi = clubId === state.clubId ? selectStartingXI(sq) : sq.slice(0,11);
+  // AI clubs tire too — see applyAIFatigue. Before that they never lost any
+  // condition at all, so their multiplier sat at a permanent 1.00 while yours
+  // fell as low as 0.88: a penalty of up to a eighth of your side's strength
+  // that no opponent in the game ever carried. Their XI is taken as the best
+  // available, the same basis their results are simulated on.
+  const xi = selectStartingXI(sq);
   if(!xi.length) return 1;
   let sum = 0, n = 0;
   xi.forEach(p=>{
@@ -10944,6 +10972,13 @@ function playEuroLeagueRound(key){
     const a = pool[i], b = pool[i+1];
     const {hg,ag} = simulateScore(state.squads[a], state.squads[b]);
     applyEuroResult(comp, a, b, hg, ag);
+      // League-phase nights counted for NO club, while your own were committed
+      // in full — so European goals lifted your players up the scoring chart
+      // and nobody else's. Other clubs now count too; yours still comes through
+      // commitMatchStats, so it is recorded once.
+      if(a!==state.clubId && b!==state.clubId){
+        recordQuickStats(a, hg, ag); recordQuickStats(b, ag, hg);
+      }
     if(a===state.clubId || b===state.clubId){
       userMatch = {home:a, away:b, hg, ag, week:state.week};
       clubById(state.clubId).balance += EURO_COMPS[key].prize[0];
@@ -11007,6 +11042,8 @@ function playEuroKnockoutRound(key, stage){
     // Both clubs earn their nation coefficient credit for reaching this round.
     addCoeffPoints(a, roundBonus); addCoeffPoints(b, roundBonus);
     if(res.winner) addCoeffPoints(res.winner, COEFF_WIN);
+    // A tie of yours is committed in full by commitMatchStats (both clubs), so
+    // recording it here as well would count every European goal twice.
     if(a!==state.clubId && b!==state.clubId){
       recordQuickStats(a, res.hg, res.ag); recordQuickStats(b, res.ag, res.hg);
     }
@@ -11421,6 +11458,18 @@ function advanceCupRound(cupKey){
   cup.pairings.forEach(([a,b])=>{
     const res = resolveCupTie(a,b);
     winners.push(res.winner);
+    // A cup tie is a game of football: the men who played it get their
+    // appearance and their goals. These ties counted for nobody at all, so a
+    // run to the final left no mark on anyone's season — and a squad player
+    // who featured mainly in the cups looked as though he had barely played,
+    // which counts against him when he thinks about retiring.
+    // English cup ties counted for NO club, while your own were committed in
+    // full — so your players' cup goals reached the scoring chart and nobody
+    // else's did. A tie of yours is still recorded once, by commitMatchStats.
+    if(!res.bye && a!==state.clubId && b!==state.clubId){
+      recordQuickStats(a, res.hg, res.ag);
+      recordQuickStats(b, res.ag, res.hg);
+    }
     if((a===state.clubId || b===state.clubId) && !res.bye){
       clubById(state.clubId).balance += cfg.prizePerRound[roundIdx];
       userTie = {a, b, hg:res.hg, ag:res.ag, prize:cfg.prizePerRound[roundIdx], shootout:res.shootout};
@@ -12743,7 +12792,7 @@ const ERROR_AREAS = {
   "SQD-01":"Squad ledger — unexplained departure", "SQD-02":"Squad ledger", "SQD-03":"Squad roles", "TAC-01":"Custom formations",
   "YTH-01":"Youth scouting", "YTH-02":"Youth intake report", "STF-01":"Backroom staff", "INT-01":"International break",
   "SCT-02":"Club scouting network", "SCT-03":"Seasonal club scouting",
-  "SIM-05":"Penalty shootout", "TRF-10":"Settling agreed deals",
+  "SIM-06":"Midweek fixture stats", "SIM-07":"AI fatigue", "SIM-05":"Penalty shootout", "TRF-10":"Settling agreed deals",
   "TRF-14":"Transfer market maintenance", "TRF-15":"Buy-back clauses",
 };
 
@@ -14637,7 +14686,7 @@ function renderTable(){
       <span><i style="background:#E8B94E"></i>Play-offs</span>
       <span><i style="background:var(--bad)"></i>Relegation</span>
     </div>
-    <div class="section-title">Top scorers</div>
+    <div class="section-title">Top scorers <span style="font-weight:400; color:var(--text-dim); font-size:11.5px;">all competitions</span></div>
     <div id="topScorersList"></div>`;
   const rules = TIER_RULES[activeTableTier] || {auto:0, playoff:0, releg:(FOREIGN_LEAGUES[activeTableTier]||{}).releg||0};
   const rows = computeTable(activeTableTier);
@@ -15502,6 +15551,8 @@ async function simUnemployedWeek(){
     if(cup && !cup.champion && cup.pairings && CUP_CONFIG[key].weeks[cup.round]===week) advanceCupRound(key);
   });
   tickAvailability();
+  // Everyone else's week of football tires them too, exactly as yours does.
+  try{ applyAIFatigue(clubsWithFixtureThisWeek()); }catch(e){ reportError("SIM-07", e, "AI fatigue"); }
   tickManagerWeek();
   generateManagerVacancies();
   // Last line of defence. The check at the top of the week can be stepped
@@ -15584,6 +15635,26 @@ async function advanceWeek(){
       const opp = clubById(f.home===state.clubId ? f.away : f.home);
       const mine = f.home===state.clubId ? f.hg : f.ag;
       const theirs = f.home===state.clubId ? f.ag : f.hg;
+      // A game your assistant took still counts. recordQuickStats gives the
+      // players their appearances and goals but never touched your season
+      // record or your runs, so four games a season went missing from your
+      // W-D-L in a 24-club division — and a defeat in one of them did not end
+      // an unbeaten run, which could win you an achievement you had not earned.
+      try{
+        const ss = state.seasonStats, st = state.streaks;
+        const won = mine > theirs, drew = mine === theirs;
+        if(ss){
+          ss.played++; ss.goalsFor += mine; ss.goalsAgainst += theirs;
+          if(won) ss.won++; else if(drew) ss.drawn++; else ss.lost++;
+        }
+        if(state.manager){ state.manager.careerGames++; if(won) state.manager.careerWins++; }
+        if(st){
+          st.scoring    = mine > 0      ? st.scoring + 1    : 0;
+          st.unbeaten   = (won || drew) ? st.unbeaten + 1   : 0;
+          st.cleanSheet = theirs === 0  ? st.cleanSheet + 1 : 0;
+          st.win        = won           ? st.win + 1        : 0;
+        }
+      }catch(e){ reportError("SIM-06", e, "midweek fixture stats"); }
       pushNews("Midweek fixture",
         `Your assistant took charge of the midweek game ${f.home===state.clubId?"at home to":"away at"} ` +
         `${opp?opp.name:"your opponents"}: ${mine}-${theirs}. ` +
@@ -15856,6 +15927,8 @@ async function advanceWeek(){
   enforceFinancialRules();
   generateWeeklyWire();
   tickAvailability();
+  // Everyone else's week of football tires them too, exactly as yours does.
+  try{ applyAIFatigue(clubsWithFixtureThisWeek()); }catch(e){ reportError("SIM-07", e, "AI fatigue"); }
   expireOffers();
   generateIncomingOffers();
   generateTransferRequests();
@@ -20152,10 +20225,35 @@ const RECORD_DEFS = [
   {id:"cleanSheets", label:"Most clean sheets in a season", unit:"clean sheets", higher:true},
 ];
 
+/* Records belong to the CLUB, not to you. They were kept in one flat object,
+   so taking a job elsewhere showed your new club a page headed "Club records"
+   listing feats set at your old one. They are now filed under each club's id,
+   and a career saved under the old shape has its records moved to the club you
+   were at when they were set. */
 function recordsState(){
   if(!state.records) state.records = {};
   if(!state.legends) state.legends = [];
-  return state.records;
+  // Migrate a flat save: anything that looks like a record entry at the top
+  // level belonged to whichever club it names.
+  const flat = Object.keys(state.records).filter(k=>{
+    const v = state.records[k];
+    return v && typeof v === "object" && v.value !== undefined && v.playerId !== undefined;
+  });
+  if(flat.length){
+    const moved = {};
+    flat.forEach(k=>{
+      const rec = state.records[k];
+      let owner = state.clubId;
+      Object.keys(CLUB_META).forEach(cid=>{ if(CLUB_META[cid] && CLUB_META[cid].name === rec.club) owner = cid; });
+      (moved[owner] = moved[owner] || {})[k] = rec;
+      delete state.records[k];
+    });
+    Object.keys(moved).forEach(cid=>{
+      state.records[cid] = Object.assign({}, state.records[cid] || {}, moved[cid]);
+    });
+  }
+  if(!state.records[state.clubId]) state.records[state.clubId] = {};
+  return state.records[state.clubId];
 }
 
 /* Offer a figure to a record. Returns true if it now stands. */
