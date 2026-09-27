@@ -1617,6 +1617,16 @@ const TIER_FILLER_OVR = { // baseline range for procedurally generated squad mem
   premierleague:[14,17], championship:[10,14], leagueone:[8,11], leaguetwo:[6,10], nationalleague:[5,8],
   nlnorth:[4,7], nlsouth:[4,7]
 };
+/* Where an academy's ORDINARY products end up, by division — internal points
+   off the rolls below. The intake scaled a boy's starting ability by division
+   but not his ceiling, so a National League academy turned out boys with
+   League One ceilings (69-78, the same as at the top) and the lower divisions
+   crept upward every season for ever: over ten seasons the National League
+   rose from 58 to 66 and was still climbing. Set so each division's ordinary
+   intake sits a little above its own level, since boys often fall short of
+   their ceiling and the best are sold upward. The rare gem is untouched — a
+   real talent can come from anywhere. Foreign leagues are left as they were. */
+const TIER_YOUTH_POT_SHIFT = { championship:-1, leagueone:-2, leaguetwo:-3, nationalleague:-4, nlnorth:-5, nlsouth:-5 };
 const TIER_YOUTH_BASE = { premierleague:11, championship:9, leagueone:7, leaguetwo:6, nationalleague:5 ,
   laliga:11, seriea:11, bundesliga:11, ligue1:10, primeira:9, eredivisie:9, probelgium:8, spfl:8,
   nlnorth:4, nlsouth:4,
@@ -2806,6 +2816,17 @@ function buildClubMeta(){
   try{ normaliseStadiums(); }catch(e){}
 }
 
+/* A club's name that can never throw. The most common crash in the error
+   sheet — "Cannot read properties of undefined" — came from a club lookup that
+   returned nothing and then had .name read off it: it happened in
+   effectiveWageBudget, was fixed, then turned up in maxWageFor. Match reports
+   in the weekly loop read club names the same raw way, and one bad id there
+   would stop the week from advancing at all. */
+function clubName(id, fallback){
+  const c = (typeof clubById === "function") ? clubById(id) : null;
+  return (c && c.name) || fallback || "another club";
+}
+
 function clubById(id){ return CLUB_META[id]; }
 
 /* =========================================================================
@@ -2970,7 +2991,15 @@ function potentialOf(p){
   // A ceiling, by definition. ratingOf recomputes from live attributes while
   // this reads a stored value, so any change that skipped recomputeOverall
   // could leave a player shown as better than his own potential.
-  const floor = ratingOf(p) + youthHeadroom(p.age);
+  // The floor stops a ceiling ever showing BELOW current ability — that is all
+  // it is for. It used to add 4-6 points of "headroom" for anyone under 26, so
+  // a player who had already reached his true limit was still shown growth he
+  // would never have (6 points at 18, the age you decide on professional
+  // terms), and the figure crept upward year after year. Development has always
+  // aimed at the true potential, so this changes what you are told, not how
+  // good anyone becomes. It also stops AI clubs keeping every under-21 as if he
+  // still had growth left, and stops prices charging for growth that isn't there.
+  const floor = ratingOf(p);
   return Math.min(99, Math.max(pot, floor));
 }
 
@@ -4060,7 +4089,7 @@ const P_KEYS = ["id","clubId","first","last","age","pos","isReal","nat","potenti
   "isCaptain","isViceCaptain","promisedStart","finesReceived","unsettled","disciplinary","evt","awardsExtra","sponsor","stadiumName",
   // Appended, never reordered: old saves decode positionally, so anything new
   // has to go on the end where it simply reads as absent.
-  "isPenTaker","squadNo","trainFocus","caps","intGoals","lastCapSeason","renewalRefusedAt","joinedAbs","optionToBuy",
+  "isPenTaker","squadNo","trainFocus","caps","intGoals","lastCapSeason","renewalRefusedAt","joinedAbs","optionToBuy","agreedToJoin",
   // These were all being assigned and then silently dropped on every reload —
   // form and ambition since the beginning, the last three since they were added.
   "form","ambition","avatarSeed","lastRating","quitting",
@@ -4540,11 +4569,23 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "5.9.3";
+const GAME_VERSION = "5.15.0";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
 const VERSION_NOTES = {
+  "5.15.0": "Young players now get a career instead of vanishing. Every other club took on three youngsters a year however full its squad was, so a full club released them straight back out and they were cut from the free-agent pool almost at once — by the third summer, a quarter of all the teenagers the game created were gone again before that same summer ended, more than five hundred a year. Clubs now take on scholars for the places they actually have; retirements free a place or two most summers, so young players keep coming through. Over ten seasons half as many young players leave the game, the typical age for leaving has risen to 33 as more players finish full careers, and the divisions stay just as level. Your own academy is unchanged.",
+  "5.14.1": "Players now leave the professional game for a reason. One free agent in ten used to be removed every summer at random, whatever his age, so a 23-year-old or a 27-year-old in his prime could simply vanish. Now veterans retire, more likely with each year past 30, and a younger man drifts into non-league only after two summers without a club. The 5.14.0 note has also been corrected: your own academy is pitched to your division as well, a few points lower below the Premier League, with the rare gem unchanged.",
+  "5.14.0": "The football world now stays the same shape however long you play. Academies scaled a boy's starting ability to his club's division but not his ceiling, so a National League academy produced boys with the same ceilings as a Premier League one. Each generation outgrew the one it replaced, and the lower divisions crept upward every season without end: over ten seasons the National League rose from a typical player of 58 to 66, League Two from 63 to 69, and both were still climbing — in a long career the whole pyramid would have flattened. An academy's ordinary products are now pitched just above its own division's level. Over the same ten seasons every division now levels off within a few points of where it started. A genuine gem can still come from any club. Your own academy is pitched to your division too: its ordinary and good boys have ceilings a few points lower than before below the Premier League, while the rare gem is unchanged.",
+  "5.13.1": "What you are shown about a youngster is now true. Every ceiling on every youth screen was being converted to the 0-100 scale twice, which pushed it to 99 — so the Academy, the Youth Watch shortlist, the decision when a boy turns 18 and the intake news all showed every boy with a ceiling of 99 and the verdict 'Potential to be special', however limited he really was. They now show his real ceiling and a verdict that matches it, from 'Unlikely to make it' up to 'Potential to be special'. The ceiling also no longer adds four to six points of growth a young player does not have: a boy already at his limit was still shown room to improve, most of all at 18 when you decide on professional terms, and the figure crept up year after year. Followed over eight seasons, no boy now outgrows the ceiling he was shown and none of the ceilings drift. How good players become is unchanged — development always aimed at their true potential.",
+  "5.13.0": "The academy now works the way a real one does. Boys come up from the junior sides at 16 on a two-year scholarship, and stay in the academy through 16, 17 and 18 before you must offer professional terms or let them go. Until now the academy aged everyone in the same summer new boys arrived, so a 16-year-old lost the first year of his scholarship, a 17-year-old got a single season, and an 18-year-old could arrive and leave the same summer — with the news claiming he had waited a full season for your decision. A 16-year-old you promote joins the first team on his scholarship at the set £165 a week and can sign professional forms at 17; he used to be announced as signing a professional contract, on a four-year deal paid by his potential. No one under 18 now signs for longer than three years, as the rules require. And a squad trim in the youth system that could silently delete your players, including young scholars, is gone.",
+  "5.12.1": "A player who agreed to join you in the window could back out when it opened. Agreeing the deal asked him one question and completing it asked a stricter one, so he could shake hands in October and then refuse in January over dropping to your division — something he knew all along. Agreeing now asks exactly the question buying does, so a player who would never come tells you so straight away and why; and once he has agreed, the deal goes through as agreed rather than being reopened.",
+  "5.12.0": "Your squad no longer shrinks to 24 every summer. After the other clubs did their summer business, the game trimmed every over-full squad in the game — yours included — cutting anything over 26 straight down to 24. Worse, it did not release those players, it deleted them: no news, no fee, not even a place among the free agents. That is where 'my squad went from 30 to 24' came from, and it had been running every season since. Your squad is now yours to manage up to the 30-man limit, and when other clubs trim theirs, the players they cut become free agents. The end-of-season squad summary, built to catch exactly this, had been counting players who quit football at every club in the game as your retirements — so it could say '24 retired' from a squad of 28, posted a retirement notice for two dozen strangers each summer that pushed your own news out, and could never spot a real loss. It now checks player by player, adds up correctly, and names anyone who leaves without a reason. Other clubs also no longer release promising youngsters just because they are not good yet.",
+  "5.11.1": "A long career can now keep saving when your phone's storage is nearly full. When space runs short the game makes a slimmed-down rescue save — but it was keeping your entire record of past results, up to fifteen hundred matches and the largest optional thing in the save, at exactly the moment it needed to shrink. On a nearly full phone that could stop the career saving altogether. The rescue now keeps the last two hundred results instead. A normal save still keeps everything, and if there is truly no room left you are told plainly rather than finding out later.",
+  "5.11.0": "A pre-season briefing. When you choose your pre-season tour you now get one item in your news covering what needs sorting while the window is open: players running into the last year of their deals, any part of the squad you are short in, what the board expect, who wears the armband, your wage budget and headroom, and any young players ready to push on. It arrives once a season as a single item you read when you like, never a pop-up. It had been written long ago and never switched on, and it had three faults put right first: a player with no years left on his contract was skipped entirely, gaps were written in position codes rather than words, and it always claimed the window was open whether it was or not.",
+  "5.10.2": "No change to how the game plays. Running every check many times over turned up one that failed about one run in ninety — the game was right and the check was wrong, and a check that fails at random is one you stop trusting. It is fixed, confirmed over two hundred runs, and every other randomised check was run twenty times with no failures.",
+  "5.10.1": "Keeping the game playable, guided by the real error reports. The advance button you press had no protection at all: the careful version — which refuses a second tap while a week is still running and catches any error — was attached to a button that no longer exists on the page. A quick double tap on a phone could start two weeks running over the same data at once, and an error part-way through went unreported. Every way of moving the week on now goes through the one protected route, including carrying on from the contracts screen into the new season. The most common crash in the error reports was a club lookup coming back empty and then being read from; it had been fixed in two places and kept appearing in the next. Every such lookup in the game is now safe — in the weekly results, the season rollover, the season summary and the club selection screen — and the club-select crash you reported has been checked against every kind of bad data.",
+  "5.10.0": "You can now agree to sign a player while the transfer window is shut. You could always agree to sell one out of window and have it go through when the window opened, but never to buy — which is not how football works. On another club's player, with the window closed, you can shake hands on a deal that completes the day the window opens. The selling club and the player both have to want it, and it costs a little more than a deal in the window, because clubs charge for committing early. You can call it off at any time before it completes, it sits in your action list so the money never comes as a surprise, and no other club will buy him from under you in the meantime. If it cannot go through when the window opens — no room in the squad, say — you are told once and have the rest of the window to sort it; still stuck at the deadline, it falls through. Up to three at once. The old version of this, which nothing used, completed deals on the last day of the window and silently dropped any that failed.",
   "5.9.3": "Following through on the last change: every club tiring could have made the whole game easier if rival clubs simply played the same eleven into the ground. They do not — team selection already weighs a player's fitness as well as his ability, so a tired man drops down the pecking order and clubs rotate on their own. Over a season both you and your opponents settle at much the same level of freshness, and a squad spreads out the way a real one does. The extra work costs under two thousandths of a second a week, so advancing a week is no slower.",
   "5.9.2": "You were the only club in the game that got tired. Match fitness cost a weary side up to an eighth of its strength — but only yours ever lost condition, so every opponent played at full freshness all season while you carried a handicap nobody else did, and rotating your squad was fighting a problem no rival had. Every club now tires and recovers the same way you do, judged on the side it would actually field, so squad rotation matters for your opponents too. Shadow-league clubs that are not simulated are left alone.",
   "5.9.1": "Correcting 5.9.0, which had this the wrong way round and would have counted your cup goals twice. What was actually wrong: in the English cups and the European league phase, ties between other clubs recorded no appearances or goals at all, while your own were recorded in full — so your players climbed the scoring chart on goals nobody else was credited with. Those ties now count for other clubs too, and your own are still recorded once, through the match report. The chart also now says it counts all competitions, which it does.",
@@ -5032,6 +5073,10 @@ function _saveStateNow(){
       rescue.tiers = packFixtures(state.tiers);
       rescue.wire = []; rescue.news = (state.news||[]).slice(0,10);
       rescue.memorials = (state.memorials||[]).slice(0,20);
+      // The single largest optional list, and the rescue kept it whole: up to
+      // 1,500 of your past results, around 480KB, carried into a save that only
+      // exists because storage is full. Keep the last few seasons of it.
+      rescue.matchHistory = (state.matchHistory||[]).slice(-200);
       const rescuePayload = encodeSave(JSON.stringify({clubMeta:packClubMeta(CLUB_META), game:rescue, packed:2, schema:SAVE_SCHEMA}));
       window.localStorage.setItem(STORAGE_KEY, rescuePayload);
       // The rescue path used to return without checking. A write that silently
@@ -5137,7 +5182,7 @@ function newCareer(clubId, customIdentity){
   initNationalCups();
   initEuroForSeason();
   setBoardObjective();
-  pushNews("Welcome to " + clubById(clubId).name,
+  pushNews("Welcome to " + clubName(clubId),
     "The board have handed you the reins. " + (state.boardObjective ? state.boardObjective.text : "Good luck."), "board");
   saveState();
 }
@@ -5470,6 +5515,9 @@ function runSeasonRollover(){
   // is taken here, before anything touches it, and reconciled at the end
   // against every departure we can name.
   const _squadBefore = ((state.squads && state.squads[state.clubId]) || []).length;
+  // WHO is in the squad as the summer starts, not just how many — see the
+  // squad ledger at the end of this function.
+  const _squadBeforeList = ((state.squads && state.squads[state.clubId]) || []).map(p=>({id:p.id, name:fullName(p)}));
   const plans = {};
   TIERS.forEach(t=> plans[t.id] = computeMovementPlan(t.id));
 
@@ -5543,13 +5591,16 @@ function runSeasonRollover(){
     newMembership[t.id].forEach(id=>{ if(CLUB_META[id]) CLUB_META[id].tier = t.id; });
   });
 
+  // The academy ages a year BEFORE this summer's intake arrives. It used to
+  // run after, so every new boy was aged the moment he joined: a 16-year-old
+  // lost the first year of his scholarship, a 17-year-old got a single season,
+  // and an 18-year-old walked out the same summer — with news claiming he had
+  // been "waiting on your decision for a full season". Anyone who reaches 19
+  // without a decision still leaves, as a real academy calendar forces.
+  ageAcademy();
   const youthResult = runYouthRotation();
   const youthLog = youthResult.graduates;
   const growthLog = youthResult.growth;
-  // Youth Watch prospects age alongside everyone else. Anyone who reaches 18
-  // without a decision leaves on his own — the same choice a real academy
-  // is forced into by the calendar.
-  ageAcademy();
   try{ refreshStaffMarket(true); }catch(e){ reportError("STF-01", e, "staff market"); }
   // The academy intake message — the one day in the year every manager waits
   // for. Reported after ageing so the numbers shown are the new season's.
@@ -5601,8 +5652,13 @@ function runSeasonRollover(){
       }
     }
   });
+  // YOUR retirements. Life events collect quitters from every club in the
+  // game, and taking all of them counted two dozen strangers a season as your
+  // players: the squad summary said "24 retired" from a squad of 28, each got
+  // a "Retirement" item that pushed your own news out of the inbox, and the
+  // inflated total meant the squad ledger could never spot a real loss.
   const retirements = (youthResult.retirements || [])
-    .concat((lifeResult.quitters || []).map(q=>q.p));
+    .concat((lifeResult.quitters || []).filter(q=> q.clubId === state.clubId).map(q=>q.p));
   retirements.forEach(p=>{
     if(retainIfRecordHolder(p)) pushNews("A name on the wall",
       `${fullName(p)} retires, but his name stays on the club's records.`, "season");
@@ -5705,8 +5761,8 @@ function runSeasonRollover(){
   // Surface the foreign promotions/relegations as news — it's how you notice the
   // rest of Europe is a living place.
   (shadowChanges||[]).forEach(ch=>{
-    const upNames = ch.up.map(id=>CLUB_META[id].name).join(", ");
-    const downNames = ch.down.map(id=>CLUB_META[id].name).join(", ");
+    const upNames = ch.up.map(id=>clubName(id)).join(", ");
+    const downNames = ch.down.map(id=>clubName(id)).join(", ");
     pushNews(`${leagueDisplayName(ch.leagueId)} — promotion & relegation`,
       `Up: ${upNames}. Down: ${downNames}.`, "season");
   });
@@ -5744,37 +5800,45 @@ function runSeasonRollover(){
   // discrepancy is reported rather than left for the manager to discover by
   // counting his own players.
   try{
-    const squadAfter = ((state.squads && state.squads[state.clubId]) || []).length;
-    const outRetired  = (retirements || []).length;
-    const outExpired  = ((contractResult && contractResult.expiring) || []).length;
-    const outLoanEnd  = (returnedLoanees || []).length;
-    const outLoanedOut= (loanedOut || []).length;
-    const inYouth     = (youthLog || []).length;
-    const accountedOut = outRetired + outExpired + outLoanEnd + outLoanedOut;
-    const accountedIn  = inYouth;
+    /* Reconciled BY PLAYER, not by adding up counts. The counting version was
+       fooled three ways at once — it took academy intake as squad arrivals
+       (they join the academy), counted players loaned OUT as departures (they
+       stay in your squad, only marked as away), and counted every player who
+       quit football anywhere in the game as one of yours. The errors cancelled
+       each other out, so it could never see a real loss. Now: who was here,
+       who is missing, cross off every departure that can be named, and report
+       anyone left over BY NAME. */
+    const mine = (state.squads && state.squads[state.clubId]) || [];
+    const squadAfter = mine.length;
+    const afterIds = new Set(mine.map(p=> p.id));
+    const beforeIds = new Set(_squadBeforeList.map(b=> b.id));
+    const idsOf = list=> new Set((list || []).map(x=> (x && x.p) ? x.p.id : (x && x.id)));
+    const retiredIds = idsOf(retirements);
+    const expiredIds = idsOf(contractResult && contractResult.expiring);
+    const loanEndIds = idsOf(returnedLoanees);
+    const left = _squadBeforeList.filter(b=> !afterIds.has(b.id));
+    const outRetired = left.filter(b=> retiredIds.has(b.id)).length;
+    const outExpired = left.filter(b=> expiredIds.has(b.id)).length;
+    const outLoanEnd = left.filter(b=> loanEndIds.has(b.id)).length;
+    const unexplained = left.filter(b=> !retiredIds.has(b.id) && !expiredIds.has(b.id) && !loanEndIds.has(b.id));
+    const arrived = mine.filter(p=> !beforeIds.has(p.id)).length;
 
     const outBits = [];
-    if(outRetired)   outBits.push(`${outRetired} retired`);
-    if(outExpired)   outBits.push(`${outExpired} out of contract`);
-    if(outLoanEnd)   outBits.push(`${outLoanEnd} loan${outLoanEnd===1?"":"s"} ended`);
-    if(outLoanedOut) outBits.push(`${outLoanedOut} loaned out`);
-    const inBits = [];
-    if(inYouth) inBits.push(`${inYouth} from the academy`);
-
+    if(outRetired) outBits.push(`${outRetired} retired`);
+    if(outExpired) outBits.push(`${outExpired} out of contract`);
+    if(outLoanEnd) outBits.push(`${outLoanEnd} loan${outLoanEnd===1?"":"s"} ended`);
     pushNews("Squad changes",
       `You go into the new season with ${squadAfter} players, from ${_squadBefore}.` +
-      (inBits.length ? ` In: ${inBits.join(", ")}.` : "") +
+      (arrived ? ` In: ${arrived}.` : "") +
       (outBits.length ? ` Out: ${outBits.join(", ")}.` : "") +
-      (!inBits.length && !outBits.length ? " Nobody came or went." : ""),
+      (!arrived && !outBits.length ? " Nobody came or went." : ""),
       "season");
 
-    // The books should balance. If they don't, something removed a player
-    // without saying so — exactly the fault this ledger exists to catch.
-    const expected = _squadBefore + accountedIn - accountedOut;
-    const drift = expected - squadAfter;
-    if(drift > 0){
-      reportError("SQD-01", {message:`${drift} player(s) left unaccounted for`},
-        `squad ${_squadBefore} → ${squadAfter} · in ${accountedIn} · out ${accountedOut}`);
+    // Anyone who left and cannot be accounted for is named, so the fault can
+    // be traced rather than guessed at.
+    if(unexplained.length){
+      reportError("SQD-01", {message:`${unexplained.length} player(s) left unaccounted for: ${unexplained.map(b=>b.name).join(", ")}`},
+        `squad ${_squadBefore} → ${squadAfter}`);
     }
   }catch(e){ reportError("SQD-02", e, "squad ledger"); }
 
@@ -6120,6 +6184,7 @@ function runAITransferWindow(){
     const reportIds = Object.keys(clubScoutingEntry(buyer.id).reports || {});
     reportIds.slice().sort(()=>Math.random()-0.5).slice(0,80).forEach(pid=>{
       const target = findPlayerAnywhere(pid);
+      if(target && target.agreedToJoin === state.clubId) return;   // he has agreed to join you
       if(target && target.clubId !== buyer.id && target.clubId !== state.clubId && !target.loanedFrom){
         seenTargets.add(target.id);
         const seller = clubById(target.clubId);
@@ -6142,6 +6207,7 @@ function runAITransferWindow(){
       if(!sq || sq.length<=16) continue; // don't gut a thin squad
       const target = pick(sq);
       if(!target || target.loanedFrom || seenTargets.has(target.id)) continue;
+      if(target.agreedToJoin === state.clubId) continue;          // he has agreed to join you
       // Interested in players better than their average, or young with big potential.
       const upgrade = target.overall - buyerAvg;
       const prospect = (target.potential||target.overall) - buyerAvg;
@@ -6168,12 +6234,22 @@ function runAITransferWindow(){
     moves.push({player:deal.target, from:deal.seller, to:buyer, fee:deal.price});
   });
 
-  // Trim over-full squads by releasing the weakest.
+  /* Trim over-full AI squads, and RELEASE the players cut.
+     This used to run over EVERY squad in the game, the manager's included, and
+     cut any squad over 26 straight down to 24 — every summer. It also did not
+     release anyone, whatever the comment said: "sq.length = SQUAD_TARGET" just
+     chopped the end off the list, so those players were deleted from the game
+     with no news, no fee and not even a place among the free agents. That is
+     where "my squad went from 30 to 24" came from. Your own squad is yours to
+     manage up to the 30-man limit; only AI clubs that have over-bought are
+     trimmed here, and the men they let go join the free-agent pool. */
   Object.keys(state.squads).forEach(cid=>{
+    if(cid === state.clubId) return;
     const sq = state.squads[cid];
     if(sq.length > SQUAD_TARGET+2){
       sq.sort((a,b)=> (b.overall + (b.potential||b.overall)*0.3) - (a.overall + (a.potential||a.overall)*0.3));
-      sq.length = SQUAD_TARGET;
+      const cut = sq.splice(SQUAD_TARGET);
+      cut.forEach(pl=>{ pl.clubId = cid; releaseToFreeAgents(pl); });
     }
   });
   return moves;
@@ -8994,6 +9070,7 @@ function weeksUntilWindow(){
 
 /* ---- 2. Contracts ---- */
 function defaultContractYears(p){
+  if(p.age < 18) return 3;                 // FIFA RSTP art. 18.2: three years at most under 18
   if(p.age <= 21) return rndInt(3,6);
   if(p.age <= 27) return rndInt(2,5);
   if(p.age <= 31) return rndInt(1,4);
@@ -9728,6 +9805,17 @@ function schedulePreSeason(destId){
   if(dest.reputation) club.stature = clamp((club.stature||9) + dest.reputation*0.02, 4, 18.6);
   pushNews("Pre-season tour confirmed",
     `${club.name} head to ${dest.name}, banking ${fmtMoney(fee)}. Four friendlies are scheduled across the next month.`, "board");
+  // The briefing a manager gets before a season: what needs sorting while the
+  // window is open. One item you read when you choose to, not a pop-up — and
+  // once a season, since this function only ever runs once per pre-season.
+  try{
+    const brief = preSeasonBriefings();
+    if(brief.length) pushNews("Pre-season briefing",
+      // News text is drawn as HTML with no line-break styling, so a newline
+      // would collapse and every point would run together. Real breaks, and
+      // each heading picked out, for this item only.
+      brief.map(b=> `<b>${b.title}</b> — ${b.text}`).join("<br><br>"), "board");
+  }catch(e){ reportError("PRE-01", e, "pre-season briefing"); }
   saveState();
   return state.preSeason;
 }
@@ -9811,15 +9899,22 @@ function preSeasonBriefings(){
   const sq = state.squads[state.clubId] || [];
   const out = [];
 
-  const expiring = sq.filter(p=>(p.contractYears||9) <= 1);
+  // (p.contractYears||9) read a contract with NO years left as falsy and so as
+  // nine — skipping exactly the players who most needed flagging.
+  const yrs = p=> p.contractYears === undefined ? defaultContractYears(p) : p.contractYears;
+  const expiring = sq.filter(p=> yrs(p) <= 1);
   if(expiring.length) out.push({icon:"📄", title:"Contracts running down",
     text:`${expiring.length} player${expiring.length>1?"s are":" is"} into the final year: ${expiring.slice(0,4).map(p=>fullName(p)).join(", ")}${expiring.length>4?"…":""}. Renew or risk losing them for nothing.`});
 
   const thin = {};
   ["GK","DF","MD","FW"].forEach(pos=>{ thin[pos] = sq.filter(p=>p.pos===pos).length; });
   const need = Object.keys(thin).filter(pos=> thin[pos] < ({GK:2,DF:5,MD:5,FW:3})[pos]);
+  // In words, not the internal position codes.
+  const word = {GK:"goalkeeper", DF:"defence", MD:"midfield", FW:"up front"};
+  const win = transferWindowOpen();
   if(need.length) out.push({icon:"⚠️", title:"Squad gaps",
-    text:`You are light at ${need.join(", ")}. The window is open now.`});
+    text:`You are light in ${need.map(x=>word[x]).join(", ")}. ` +
+      (win ? "The window is open now." : `The window opens in ${weeksUntilWindow()} week${weeksUntilWindow()===1?"":"s"}.`)});
 
   if(state.boardObjective) out.push({icon:"📋", title:"Board expectations", text: state.boardObjective.text});
 
@@ -10161,7 +10256,7 @@ function completeSignedDeal(p, bid){
   if(state.squads[buyer.id].length >= SQUAD_MAX)
     return {ok:false, code:"TRF-05", reason:"Your squad is full."};
   const agreedWage = wageDemand(p);
-  const res = buyPlayer(p, bid.fee);
+  const res = buyPlayer(p, bid.fee, {agreed: !!bid.agreed});
   if(!res.ok) return res;
   p.wage = agreedWage;
   p.contractYears = defaultContractYears(p);
@@ -10220,23 +10315,128 @@ function isDeadlineWeek(){
 }
 
 /* ---- Deals agreed for the NEXT window (deliberately rare) ---- */
-function agreeFutureTransfer(p, fee){
+/* =========================================================================
+   AGREEING A DEAL WHILE THE WINDOW IS SHUT
+
+   You could always agree to SELL a player outside the window and have it go
+   through when the window opened. You could not agree to BUY one, which is
+   not how football works — clubs shake hands on deals months ahead all the
+   time. This is the other half of that.
+
+   A club that commits early wants paying for the certainty, so the fee is
+   above what he would cost in the window. The selling club still has to say
+   yes, you still have to be able to pay his wages, and either side of the
+   deal can fall through before it completes.
+   ========================================================================= */
+const FUTURE_DEAL_PREMIUM = 1.12;     // the price of certainty
+
+function futureDeals(){
   if(!state.futureDeals) state.futureDeals = [];
-  state.futureDeals.push({playerId:p.id, from:p.clubId, fee, season:state.season});
-  pushNews("Pre-contract agreed",
-    `${fullName(p)} will join in the next window for ${fmtMoney(fee)}.`, "transfer");
+  return state.futureDeals;
 }
+function futureDealFor(playerId){ return futureDeals().find(d=> d.playerId === playerId) || null; }
+function futureDealFee(p){ return Math.round(effectivePrice(p) * FUTURE_DEAL_PREMIUM); }
+
+/* Whether you could even open talks. Returns a reason when you could not, so
+   the button can say why instead of simply not working. */
+function canAgreeFutureDeal(p){
+  const club = clubById(state.clubId);
+  if(!club) return {ok:false, reason:"You aren't managing a club."};
+  if(transferWindowOpen()) return {ok:false, reason:"The window is open — you can bid for him now."};
+  if(!p || !p.clubId) return {ok:false, reason:"He isn't at a club you can deal with."};
+  if(p.clubId === state.clubId) return {ok:false, reason:"He's already yours."};
+  if(p.isAcademy || p.isProspect) return {ok:false, reason:"He isn't a professional yet."};
+  if(!clubById(p.clubId)) return {ok:false, reason:"He isn't at a club you can deal with."};
+  if(p.loanedFrom) return {ok:false, reason:`${fullName(p)} is on loan from another club.`};
+  if(club.transferEmbargo) return {ok:false, reason:"The club is under a transfer embargo."};
+  if(futureDealFor(p.id)) return {ok:false, reason:"You have already agreed a deal for him."};
+  if(futureDeals().length >= 3) return {ok:false, reason:"You have three deals agreed already — that is as far as the board will go."};
+  const fee = futureDealFee(p);
+  if(club.balance < fee) return {ok:false, reason:`He would cost ${fmtMoney(fee)} — more than the club has.`};
+  const wages = canAffordWages(club, p, 1);
+  if(!wages.ok) return wages;
+  return {ok:true, fee};
+}
+
+function agreeFutureTransfer(p, fee){
+  const pre = canAgreeFutureDeal(p);
+  if(!pre.ok) return pre;
+  fee = fee || pre.fee;
+  const from = clubById(p.clubId);
+  // The selling club and the player both have to fancy it.
+  // The same question the purchase itself asks. This used a looser measure,
+  // so a player could shake hands in October and then refuse in January over
+  // a division he knew all along he would be dropping to.
+  const will = signingInterest(p, clubById(state.clubId), "buy");
+  if(!will.willing) return {ok:false, reason:`${fullName(p)} ${will.reason}.`};
+  const interest = joiningInterest(p, clubById(state.clubId));
+  if(Math.random() > 0.5 + interest * 0.45)
+    return {ok:false, reason:`${from.name} will not agree a deal for him at this stage.`};
+  futureDeals().push({playerId:p.id, name:fullName(p), from:p.clubId, fee, season:state.season, week:state.week});
+  p.agreedToJoin = state.clubId;
+  pushNews("Deal agreed for the window",
+    `${fullName(p)} will join from ${from.name} for ${fmtMoney(fee)} when the window opens.`, "transfer");
+  saveState(true);
+  return {ok:true, fee, from};
+}
+
+/* Calling it off before it completes. Anything you commit to must be something
+   you can get out of — though the selling club will remember it. */
+function cancelFutureDeal(playerId){
+  const i = futureDeals().findIndex(d=> d.playerId === playerId);
+  if(i === -1) return {ok:false, reason:"There's no agreed deal for him."};
+  const d = futureDeals()[i];
+  const p = (state.squads[d.from] || []).find(x=> x.id === playerId);
+  const from = clubById(d.from);
+  futureDeals().splice(i, 1);
+  if(p) p.agreedToJoin = null;
+  pushNews("Deal called off",
+    `${p?fullName(p):"The player"} will not be joining after all. ${from?from.name:"His club"} were told late.`, "transfer");
+  saveState(true);
+  return {ok:true, player:p, from};
+}
+/* The window opens and the deals you shook hands on go through. Anything that
+   cannot be completed is SAID OUT LOUD — the old version cleared the list
+   whatever happened, so a deal that failed simply vanished with no word of it
+   and no player. A deal that fails for want of room or money is kept, so it
+   can go through later in the window once you have made space. */
 function completeFutureDeals(){
-  const done = [];
-  (state.futureDeals||[]).forEach(d=>{
-    const p = (state.squads[d.from]||[]).find(x=>x.id===d.playerId);
-    if(!p) return;
-    const res = completeSignedDeal(p, {fee:d.fee, clubId:d.from});
-    if(res.ok) done.push(p);
+  const done = [], failed = [], kept = [];
+  futureDeals().forEach(d=>{
+    const p = (state.squads[d.from] || []).find(x=> x.id === d.playerId);
+    if(!p){
+      // He has moved on, retired, or his club has gone.
+      failed.push({name:d.name || "A player you had agreed terms with", reason:"he is no longer at that club"});
+      return;
+    }
+    if(p.agreedToJoin && p.agreedToJoin !== state.clubId){
+      failed.push({name:fullName(p), reason:"he agreed to join someone else"});
+      p.agreedToJoin = null;
+      return;
+    }
+    const res = completeSignedDeal(p, {fee:d.fee, clubId:d.from, agreed:true});
+    if(res.ok){ p.agreedToJoin = null; done.push(p); return; }
+    if(isDeadlineWeek()){
+      // The window is closing and it still cannot go through: it falls apart.
+      p.agreedToJoin = null;
+      failed.push({name:fullName(p), reason:(res.reason||"the deal could not be completed").replace(/\.$/, ""), lapsed:true});
+      return;
+    }
+    // Keep it: you may sell someone or raise the money before the window
+    // shuts. Say so once, not every week it stays stuck.
+    kept.push(d);
+    if(!d.notified){
+      d.notified = true;
+      failed.push({name:fullName(p), reason:(res.reason||"the deal could not be completed").replace(/\.$/, ""), held:true});
+    }
   });
-  state.futureDeals = [];
+  state.futureDeals = kept;
   if(done.length) pushNews("Signings completed",
-    done.map(p=>fullName(p)).join(", ") + " have now joined.", "transfer");
+    done.map(p=>fullName(p)).join(", ") + (done.length>1?" have":" has") + " now joined.", "transfer");
+  failed.forEach(f=> pushNews(f.lapsed ? "Deal collapsed" : "Deal not completed",
+    `${f.name} has not joined: ${f.reason}.` +
+    (f.held ? " The agreement stands until the window shuts, so there is still time to sort it." :
+     f.lapsed ? " With the window shutting, the agreement has fallen through." : ""), "transfer"));
   return done;
 }
 
@@ -10482,10 +10682,20 @@ function runMarketRefresh(){
   if(!state.freeAgents) state.freeAgents = [];
 
   // Ageing free agents retire out of the pool rather than lingering forever.
+  // Leaving the professional game, the way players actually do. This used to
+  // remove one free agent in ten every summer at random, whatever his age, so a
+  // 23-year-old or a 27-year-old in his prime could simply vanish. Veterans now
+  // retire, more likely each year past 30; a younger man drifts into non-league
+  // only after two summers without a club; anyone else keeps looking.
   state.freeAgents = state.freeAgents.filter(p=>{
     p.age++;
     developPlayer(p, null);
-    return p.age < 37 && Math.random() > 0.10;
+    if(p.age >= 37) return false;
+    const leave = p.age >= 33 ? 0.25 + (p.age - 33) * 0.15
+                : p.age >= 30 ? 0.10
+                : (p.seasonsFree || 0) >= 2 ? 0.35
+                : 0.02;
+    return Math.random() > leave;
   });
 
   Object.values(CLUB_META).forEach(club=>{
@@ -10501,7 +10711,13 @@ function runMarketRefresh(){
     for(let i=sq.length-1; i>=0; i--){
       const p = sq[i];
       const squadAvg = sq.reduce((s,x)=>s+x.overall,0)/sq.length;
-      const surplus = p.overall < squadAvg - 2.5;
+      // A youngster whose ceiling reaches this squad's level is its future, not
+      // its surplus. Judging him on today's rating alone released 18-year-olds
+      // with more potential than the club's average player the week they came
+      // back from loan, and the pool's size limit then deleted them outright.
+      // Same bar as the dead-end rule just below, so the two agree.
+      const hasFuture = p.age <= 23 && (p.potential || p.overall) >= squadAvg - 1.5;
+      const surplus = p.overall < squadAvg - 2.5 && !hasFuture;
       const tooOld = p.age >= 33 && p.overall < squadAvg - 1;
       const deadEnd = p.age >= 20 && p.isYouth && (p.potential||p.overall) < squadAvg - 1.5;
       if((surplus || tooOld || deadEnd) && sq.length > 17 && !p.isReal && Math.random() < 0.5){
@@ -11184,7 +11400,7 @@ function buildMatchDetail(homeId, awayId, hg, ag){
   const injuries = [];
   [homeId, awayId].forEach(clubId=>{
     const medical = clubId===state.clubId
-        ? clubById(clubId).facilities.medical + (typeof staffBonus==="function" ? staffBonus("physio") : 0)
+        ? (((clubById(clubId)||{}).facilities||{}).medical || 2) + (typeof staffBonus==="function" ? staffBonus("physio") : 0)
         : 2;
     selectStartingXI(state.squads[clubId]).forEach(p=>{
       const prone = p.injuryProne ? 1.6 : 1;
@@ -11541,7 +11757,15 @@ function runYouthRotation(){
     const youthLevel = isUser
       ? club.facilities.youth + (typeof staffBonus==="function" ? staffBonus("headOfYouth") : 0)
       : 2;
-    const intakeCount = clamp(1+youthLevel, 2, 6);
+    // An AI club takes on scholars for the places it has. It used to take three
+    // whatever its size, so a full club released three straight back out, the
+    // free-agent pool's size limit cut them, and by the third summer a quarter
+    // of all teenagers created were gone again before that summer ended. (Taking
+    // "one extra" to push out a veteran does not work: a new 16-year-old almost
+    // always ranks below established players, so it is the boy who goes.)
+    // Retirements free a place or two most summers, so youth keeps flowing.
+    const intakeCount = isUser ? clamp(1+youthLevel, 2, 6)
+                               : clamp(SQUAD_TARGET - squad.length, 0, 3);
     const baseline = (TIER_YOUTH_BASE[club.tier] || 7) + youthLevel;
     for(let i=0;i<intakeCount;i++){
       const pos = pick(["GK","DF","DF","MD","MD","FW"]);
@@ -11563,7 +11787,7 @@ function runYouthRotation(){
       if(alumni.length && Math.random() < 0.05){
         p = makeRelatedYouth(pick(alumni), club, academyBonus);
         if(isUser) pushWire(`${p.fatherName}'s son signs for ${club.name}`,
-          `${fullName(p)}, son of former ${club.name} player ${p.fatherName}, has been handed his first professional deal.`,
+          `${fullName(p)}, son of former ${club.name} player ${p.fatherName}, has joined the academy on a scholarship.`,
           "personal", club.id);
       } else if(Math.random() < 0.018){
         const n = Math.random() < 0.12 ? 3 : 2;
@@ -11573,7 +11797,7 @@ function runYouthRotation(){
           else squad.push(s);
         });
         if(isUser) pushWire(`${sibs[0].siblingType==="triplet"?"Triplets":"Twins"} sign at ${club.name}`,
-          `${sibs.map(s=>fullName(s)).join(", ")} have all been offered professional terms on the same day.`,
+          `${sibs.map(s=>fullName(s)).join(", ")} have all been offered scholarships on the same day.`,
           "personal", club.id);
         continue;
       } else {
@@ -11607,9 +11831,9 @@ function runYouthRotation(){
       } else if(gemRoll < gemOdds){
         p.potential = rndInt(18,20);                 // elite, 90+
       } else if(gemRoll < gemOdds + 0.10 + youthLevel*0.03){
-        p.potential = rndInt(15,17);                 // a good pro, 79-86
+        p.potential = rndInt(15,17) + (TIER_YOUTH_POT_SHIFT[club.tier] || 0);   // a good pro for his level
       } else {
-        p.potential = rndInt(11,15);                 // squad depth
+        p.potential = rndInt(11,15) + (TIER_YOUTH_POT_SHIFT[club.tier] || 0);   // squad depth for his level
       }
       p.potential = clamp(Math.max(p.potential, p.overall), 1, 20);
       p.potF = clamp(p.potential - Math.random()*0.4, p.ovrF !== undefined ? p.ovrF : p.overall, 20.5);
@@ -11641,10 +11865,14 @@ function runYouthRotation(){
     // survive the cut ahead of finished journeymen.
     // The player manages his own squad — never silently cut it back. AI clubs
     // trim to their working size; yours is only capped at the hard maximum.
-    const cap = isUser ? SQUAD_MAX : SQUAD_TARGET;
-    if(squad.length > cap){
+    // Only AI clubs are trimmed, and the players cut are RELEASED. This still
+    // cut YOUR squad above 30 — whatever the comment above says — and like the
+    // trim fixed in 5.12.0, "squad.length = cap" deleted players outright. A
+    // 16-year-old scholar rates low on ability and was first to go.
+    if(!isUser && squad.length > SQUAD_TARGET){
       squad.sort((a,b)=> (b.overall + (b.potential||b.overall)*0.35) - (a.overall + (a.potential||a.overall)*0.35));
-      squad.length = cap;
+      const cut = squad.splice(SQUAD_TARGET);
+      cut.forEach(pl=>{ pl.clubId = club.id; releaseToFreeAgents(pl); });
     }
   });
   return {graduates:userGraduates, growth:growthLog, retirements};
@@ -11802,7 +12030,7 @@ function applyWeeklyFinance(leagueResult){
   return state.lastFinance;
 }
 
-function buyPlayer(player, overridePrice){
+function buyPlayer(player, overridePrice, opts){
   const buyer = clubById(state.clubId);
   const seller = clubById(player.clubId);
   // There has to be a real club selling him. An academy boy or a scouted
@@ -11811,8 +12039,13 @@ function buyPlayer(player, overridePrice){
   const price = overridePrice !== undefined ? overridePrice : playerAskingPrice(player, seller.tier);
   if(buyer.balance < price) return {ok:false, reason:"Not enough budget."};
   if(state.squads[buyer.id].length >= SQUAD_MAX) return {ok:false, reason:"Your squad is full (30 maximum)."};
-  const interest = signingInterest(player, buyer, "buy");
-  if(!interest.willing) return {ok:false, reason:`${fullName(player)} ${interest.reason}.`};
+  // A player who has already shaken hands on a deal is not asked again: your
+  // standing can drift a little between agreeing in October and the window
+  // opening in January, and that is no reason for him to back out of it.
+  if(!(opts && opts.agreed)){
+    const interest = signingInterest(player, buyer, "buy");
+    if(!interest.willing) return {ok:false, reason:`${fullName(player)} ${interest.reason}.`};
+  }
   buyer.balance -= price; seller.balance += price;
   state.squads[seller.id] = state.squads[seller.id].filter(p=>p.id!==player.id);
   player.clubId = buyer.id;
@@ -12780,7 +13013,7 @@ const ERROR_AREAS = {
   "SEA-01":"End-of-season rollover", "SEA-02":"Promotion and relegation",
   "SEA-03":"Youth intake", "SEA-04":"Awards",
   "TRF-01":"Making an offer", "TRF-02":"Loan move", "TRF-03":"Contract renewal",
-  "FIN-01":"Weekly finances", "FIN-02":"Wage budget", "FIN-03":"Finance warnings", "FIN-04":"Points deductions",
+  "FIN-01":"Weekly finances", "FIN-02":"Wage budget", "FIN-03":"Finance warnings", "FIN-04":"Points deductions", "PRE-01":"Pre-season briefing",
   "SAV-01":"Saving your career", "SAV-02":"Loading your career",
   "DAT-01":"Player data",
   "SYS-01":"Uncaught script error", "SYS-02":"Background task failed",
@@ -13312,7 +13545,7 @@ function renderDashboard(){
   const cupFixture = getUserCupFixtureThisWeek();
   const cupBannerHTML = cupFixture
     ? `<div class="hero-card" style="margin-bottom:12px; padding:12px 16px;">
-        <div style="font-size:13px;">${cupFixture.competition} — Round ${cupFixture.round} vs ${clubById(cupFixture.opponentId).name}</div>
+        <div style="font-size:13px;">${cupFixture.competition} — Round ${cupFixture.round} vs ${clubName(cupFixture.opponentId)}</div>
       </div>`
     : "";
 
@@ -13815,7 +14048,7 @@ function renderAcademy(host){
   const due = academyDecisionsDue();
   const youthLevel = (club.facilities && club.facilities.youth) || 1;
   const avgCeil = players.length
-    ? Math.round(players.reduce((s,p)=>s+to100(potentialOf(p)),0)/players.length) : "—";
+    ? Math.round(players.reduce((s,p)=>s+potentialOf(p),0)/players.length) : "—";
   const best = players.length
     ? players.slice().sort((a,b)=>potentialOf(b)-potentialOf(a))[0] : null;
 
@@ -13840,7 +14073,7 @@ function renderAcademy(host){
 
   const rows = players.map(p=>{
     const now  = Math.round(to100(p));
-    const ceil = Math.round(to100(potentialOf(p)));
+    const ceil = Math.round(potentialOf(p));
     const band = ceilingBand(p);
     const isDue = p.age >= ACADEMY_PRO_AGE;
     const g = p.growthLast;
@@ -15102,7 +15335,7 @@ function renderClubEurope(content){
       <div class="section-title" style="margin:0 0 6px;">${EURO_COMPS[myComp].name}</div>
       <div class="obj">${comp.stage==="league"
         ? `League phase — ${ordinal(myPos)} of 36 after ${comp.table[state.clubId].played} match${comp.table[state.clubId].played===1?"":"es"}. Top 8 go straight to the last 16.`
-        : comp.champion===state.clubId ? "🏆 You won it." : comp.champion ? `Eliminated — ${clubById(comp.champion).name} won it.` : `Knockout stage: ${comp.koStage}`}</div>
+        : comp.champion===state.clubId ? "🏆 You won it." : comp.champion ? `Eliminated — ${clubName(comp.champion)} won it.` : `Knockout stage: ${comp.koStage}`}</div>
     </div>`;
   } else {
     html += `<div class="empty-hint" style="padding:16px;">Not in Europe this season. Finish high enough in your league to qualify.</div>`;
@@ -15112,7 +15345,7 @@ function renderClubEurope(content){
     const comp = state.euro[key];
     if(!comp) return;
     const sorted = euroSortedTable(key).slice(0,10);
-    html += `<div class="section-title">${EURO_COMPS[key].name}${comp.champion?" — 🏆 "+clubById(comp.champion).name:""}</div>
+    html += `<div class="section-title">${EURO_COMPS[key].name}${comp.champion?" — 🏆 "+clubName(comp.champion):""}</div>
       <div class="list">${sorted.map((r,i)=>{
         const c = clubById(r.id);
         return `<div class="table-row${r.id===state.clubId?" me":""}${i<8?" promo":""}">
@@ -15499,10 +15732,36 @@ function openPlayerModal(p, isOwn){
     // purchase alongside the scouting panel instead of over it.
     const open = transferWindowOpen();
     const wait = open ? 0 : weeksUntilWindow();
+    const agreed = futureDealFor(p.id);
+    // With the window shut you can still shake hands on a deal that goes
+    // through the day it opens, at a premium for the certainty.
+    const futureHTML = open ? "" : agreed
+      ? `<div class="renew-row" style="margin-top:12px;">
+           <div class="renew-name">Agreed — joins when the window opens</div>
+           <div class="renew-meta">For ${fmtMoney(agreed.fee)}, in ${wait} week${wait===1?"":"s"}.</div>
+           <div class="renew-acts"><button class="btn-secondary btn-danger" id="cancelFutureBtn">Call it off</button></div>
+         </div>`
+      : `<button class="btn-secondary" id="futureBtn" style="margin-top:10px;">Agree a deal for the window — ${fmtMoney(futureDealFee(p))}</button>
+         <div style="text-align:center; font-size:11.5px; color:var(--text-dim); margin-top:4px;">He would join the day it opens, in ${wait} week${wait===1?"":"s"}. Clubs charge more to commit early.</div>`;
     actionArea.insertAdjacentHTML("afterbegin", `
       <button class="btn-primary" id="buyBtn" style="margin-top:16px;"${open?"":" disabled"}>${
         open ? `Buy for ${fmtMoney(price)}` : `Window shut — reopens in ${wait} week${wait===1?"":"s"}`}</button>
+      ${futureHTML}
       <div id="buyMsg" style="text-align:center; font-size:12.5px; color:var(--bad); margin-top:8px;"></div>`);
+    const futureBtn = document.getElementById("futureBtn");
+    if(futureBtn) futureBtn.onclick = ()=>{
+      playClickSound();
+      const r = agreeFutureTransfer(p);
+      if(r.ok){ toast(`Agreed — ${fullName(p)} joins for ${fmtMoney(r.fee)} when the window opens`, 3800); closePlayerModal(); render(); }
+      else document.getElementById("buyMsg").textContent = r.reason;
+    };
+    const cancelFutureBtn = document.getElementById("cancelFutureBtn");
+    if(cancelFutureBtn) cancelFutureBtn.onclick = ()=>{
+      playClickSound();
+      const r = cancelFutureDeal(p.id);
+      toast(r.ok ? `Deal for ${fullName(p)} called off` : r.reason, 3200);
+      closePlayerModal(); render();
+    };
     const buyBtn = document.getElementById("buyBtn");
     if(buyBtn) buyBtn.onclick = ()=>{
       // The window is checked again here, not just when the card was drawn —
@@ -15677,7 +15936,7 @@ async function advanceWeek(){
     recordMatchHistory({season:state.season, week:r.week, competition:"Pre-season friendly", homeId:r.home, awayId:r.away, hg:r.hg, ag:r.ag, detail});
     const opp = clubById(r.away);
     pushNews("Friendly result",
-      `${clubById(r.home).name} ${r.hg}-${r.ag} ${opp?opp.name:""} in ${state.preSeason.name}.`, "info");
+      `${clubName(r.home)} ${r.hg}-${r.ag} ${opp?opp.name:""} in ${state.preSeason.name}.`, "info");
   }
 
   // Cup rounds scheduled for this week — resolved for every entrant; only the user's
@@ -15744,7 +16003,7 @@ async function advanceWeek(){
     const finalEuro = await playMatchDay(et.tie, et.label, detail);
     if(finalEuro){ et.tie.hg=finalEuro.hg; et.tie.ag=finalEuro.ag; recordMatchHistory({season:state.season, week, competition:EURO_COMPS[et.key].name, homeId:et.tie.home, awayId:et.tie.away, hg:et.tie.hg, ag:et.tie.ag, detail}); }
     if(et.prize) toast(`${EURO_COMPS[et.key].name} prize money: ${fmtMoney(et.prize)}`);
-    pushNews(et.label, `${clubById(et.tie.home).name} ${et.tie.hg}-${et.tie.ag} ${clubById(et.tie.away).name}`, "cup");
+    pushNews(et.label, `${clubName(et.tie.home)} ${et.tie.hg}-${et.tie.ag} ${clubName(et.tie.away)}`, "cup");
   }
 
   // National cups across Europe.
@@ -15769,14 +16028,14 @@ async function advanceWeek(){
         detail.attendance = gate;
         state.pendingCupGate = (state.pendingCupGate||0) + gate.revenue;
         if(gate.soldOut) pushNews("Sell-out!",
-          `${gate.attendance.toLocaleString()} packed in for the visit of ${clubById(t.b).name}. Gate receipts: ${fmtMoney(gate.revenue)}.`, "cup");
+          `${gate.attendance.toLocaleString()} packed in for the visit of ${clubName(t.b)}. Gate receipts: ${fmtMoney(gate.revenue)}.`, "cup");
       }
       const domesticFx = {home:t.a, away:t.b, hg:t.hg, ag:t.ag, week};
       const finalDomestic = await playMatchDay(domesticFx, `${outcome.cfg.name} — Round ${outcome.roundIdx+1}`, detail);
       if(finalDomestic){ t.hg=finalDomestic.hg; t.ag=finalDomestic.ag; recordMatchHistory({season:state.season, week, competition:outcome.cfg.name, homeId:t.a, awayId:t.b, hg:t.hg, ag:t.ag, detail}); }
       toast(`${outcome.cfg.name} prize money: ${fmtMoney(t.prize)}`);
       pushNews(`${outcome.cfg.name} Round ${outcome.roundIdx+1}`,
-        `${clubById(t.a).name} ${t.hg}-${t.ag} ${clubById(t.b).name}. Prize money: ${fmtMoney(t.prize)}.`, "cup");
+        `${clubName(t.a)} ${t.hg}-${t.ag} ${clubName(t.b)}. Prize money: ${fmtMoney(t.prize)}.`, "cup");
       checkAchievements({cupRoundReached: outcome.roundIdx+1});
     }
     if(outcome.champion){
@@ -15923,7 +16182,11 @@ async function advanceWeek(){
   processPendingBids();
   generateConversations();
   checkPromises();
-  if(isDeadlineWeek()) completeFutureDeals();
+  // When the window OPENS. "He will join in the next window" should mean he is
+  // there to pick, not that he turns up on the last day of it. Anything that
+  // could not go through is retried while the window stays open.
+  const _win = transferWindowOpen();
+  if(_win && (state.week === _win.from || futureDeals().length)) completeFutureDeals();
   enforceFinancialRules();
   generateWeeklyWire();
   tickAvailability();
@@ -16598,8 +16861,8 @@ function showSeasonSummary(result){
     ${(result.shadowChanges||[]).length ? `<div class="section-title">Around Europe</div>
       ${result.shadowChanges.map(ch=>`<div class="youth-item" style="display:block;">
         <div style="font-size:11.5px; color:var(--text-dim);">${leagueDisplayName(ch.leagueId)}</div>
-        <div style="font-size:12.5px; color:var(--good);">↑ ${ch.up.map(id=>CLUB_META[id].name).join(", ")}</div>
-        <div style="font-size:12.5px; color:var(--bad);">↓ ${ch.down.map(id=>CLUB_META[id].name).join(", ")}</div>
+        <div style="font-size:12.5px; color:var(--good);">↑ ${ch.up.map(id=>clubName(id)).join(", ")}</div>
+        <div style="font-size:12.5px; color:var(--bad);">↓ ${ch.down.map(id=>clubName(id)).join(", ")}</div>
       </div>`).join("")}` : ""}
     ${(result.seasonAwards && result.seasonAwards.ballonDor) ? `<div class="section-title">Ballon d'Or</div>
       <div class="motm" style="margin-top:0;">
@@ -16656,7 +16919,7 @@ let createClubSelectMode = false;
 function renderClubGrid(){
   const grid = document.getElementById("clubGrid");
   grid.innerHTML = "";
-  const ids = clubNamesFor(activeSelectTier).map(slugify).filter(id=>!isHiddenClub(id)).sort((a,b)=>CLUB_META[a].name.localeCompare(CLUB_META[b].name));
+  const ids = clubNamesFor(activeSelectTier).map(slugify).filter(id=>!isHiddenClub(id)).sort((a,b)=>clubName(a,a).localeCompare(clubName(b,b)));
   ids.forEach(id=>{
     const c = CLUB_META[id];
     const btn = document.createElement("button");
@@ -17237,6 +17500,23 @@ function collectActions(){
   const club = clubById(state.clubId);
   if(!club) return acts;
 
+  // --- Deals agreed for the next window -----------------------------------
+  // Money leaves the club the day the window opens, so these should never be
+  // a surprise.
+  futureDeals().forEach(d=>{
+    const from = clubById(d.from);
+    const p = (state.squads[d.from] || []).find(x=> x.id === d.playerId);
+    const wait = transferWindowOpen() ? 0 : weeksUntilWindow();
+    acts.push({group:"Transfers", icon:"\uD83E\uDD1D",
+      title:`${d.name || (p?fullName(p):"A player")} joins from ${from?from.name:"his club"}`,
+      sub:`Agreed at ${fmtMoney(d.fee)} · ${wait ? "completes in "+wait+" week"+(wait===1?"":"s") : "due to complete now"}`,
+      go:"squad", player:d.playerId,
+      buttons:[{label:"Call it off", run:()=>{
+        const r = cancelFutureDeal(d.playerId);
+        return r.ok ? `Deal for ${d.name||"him"} called off` : r.reason;
+      }}]});
+  });
+
   // --- Buy-backs that could be triggered --------------------------------
   (state.squads[club.id] || []).forEach(p=>{
     const live = buyBackIsLive(p);
@@ -17269,7 +17549,7 @@ function collectActions(){
       const full = (state.squads[club.id]||[]).length >= SQUAD_MAX;
       acts.push({group:"Academy", icon:"\uD83C\uDF93",
         title:`${fullName(p)} has turned ${ACADEMY_PRO_AGE}`,
-        sub:`${posOf(p)} · now ${Math.round(to100(p))}, ceiling ${Math.round(to100(potentialOf(p)))} · ${band.text.toLowerCase()} · professional terms or released, this season`,
+        sub:`${posOf(p)} · now ${Math.round(to100(p))}, ceiling ${Math.round(potentialOf(p))} · ${band.text.toLowerCase()} · professional terms or released, this season`,
         go:"squad", player:p.id,
         buttons:[
           {label: full ? "Squad full (30)" : "Professional terms", run:()=>{
@@ -18086,7 +18366,7 @@ function openYouthWatch(){
     // Best ceiling first — that is what you are shopping for at this age.
     list.innerHTML = ys.shortlist.slice().sort((a,b)=> potentialOf(b) - potentialOf(a)).map(p=>{
       const now = Math.round(to100(p));
-      const ceil = Math.round(to100(potentialOf(p)));
+      const ceil = Math.round(potentialOf(p));
       const band = ceilingBand(p);
       const col = band.cls === "good" ? "var(--good)" : band.cls === "dim" ? "var(--text-dim)" : "var(--text)";
       return `<div class="scout-row" data-openshort="${p.id}"><span class="sr-body">
@@ -19210,6 +19490,7 @@ function youthCountryDef(id){ return YOUTH_SCOUT_COUNTRIES.find(c=>c.id===id) ||
 
 const YOUTH_PROSPECT_MIN_AGE = 13;
 const YOUTH_PROSPECT_MAX_AGE = 16;
+const SCHOLAR_WAGE = 165;                // first-year scholarship wage, PL and EFL
 const ACADEMY_PRO_AGE = 18;          // professional terms or released — no more waiting
 const ACADEMY_PLACES = [16, 18, 20, 24, 26];   // by Youth Academy level 1-5
 
@@ -19217,7 +19498,11 @@ const ACADEMY_PLACES = [16, 18, 20, 24, 26];   // by Youth Academy level 1-5
    far more at a glance than a bare number does, which is how every game in
    this genre presents a young player worth signing. */
 function ceilingBand(p){
-  const c = to100(potentialOf(p));
+  // potentialOf is ALREADY on the 0-100 card scale. Converting it again read a
+  // ceiling of 70 as an internal 70 and landed on 99, so every boy in the game
+  // — academy, Youth Watch, the decision at 18, the intake news — was shown
+  // "ceiling 99" and "Potential to be special", however limited he really was.
+  const c = potentialOf(p);
   if(c >= 88) return {text:"Potential to be special", cls:"good", weight:700};
   if(c >= 80) return {text:"An exciting prospect",    cls:"good", weight:700};
   if(c >= 72) return {text:"Showing great potential", cls:"good", weight:600};
@@ -19422,6 +19707,11 @@ function academyDecisionsDue(){
 // but the academy has finite places, and if it is full the surplus are let go
 // with a word, rather than silently vanishing.
 function intakeToAcademy(p){
+  // Boys come up from the junior sides as first-year scholars, at 16: a
+  // two-year scholarship, then professional terms or release at 18. They were
+  // rolled at 16 to 18, so an 18-year-old could arrive and — aged a year in
+  // the same summer — leave before you ever saw him.
+  p.age = 16;
   const ac = academyState();
   if(ac.players.length >= academyCap()){
     (state._intakeOverflow = state._intakeOverflow || []).push(p);
@@ -19488,12 +19778,23 @@ function promoteFromAcademy(playerId){
   p.clubId = club.id;
   p.isYouth = true;
   p.isAcademy = false;
-  p.wage = Math.max(150, Math.round(playerWage(p, club.tier) * 0.25));
-  p.contractYears = clamp(20 - p.age, 2, 4);
+  // A 16-year-old can play for the first team, but only on his scholarship: a
+  // professional contract cannot be signed until 17 (EPPP). Under 18, no deal
+  // may run longer than three years (FIFA RSTP art. 18.2) — this gave a
+  // 16-year-old four.
+  const scholar = p.age < 17;
+  // Scholars are on the set scholarship wage, the same at every club: £165 a
+  // week in the first year (Premier League and EFL). Scaling it by his
+  // potential paid one 16-year-old nearly £4,000 a week. From 17 he is on a
+  // professional contract, which ranges from a few hundred to a few thousand.
+  p.wage = scholar ? SCHOLAR_WAGE : Math.max(150, Math.round(playerWage(p, club.tier) * 0.25));
+  p.contractYears = scholar ? 2 : Math.min(clamp(20 - p.age, 2, 4), p.age < 18 ? 3 : 4);
   p.renewalHandled = null;
   p.morale = Math.max(p.morale || 12, 15);
   state.squads[club.id].push(p);
-  pushNews("Professional terms",
+  if(scholar) pushNews("Into the first team",
+    `${fullName(p)} (${p.age}) joins the first-team squad on his scholarship. He can sign professional forms when he turns 17.`, "squad");
+  else pushNews("Professional terms",
     `${fullName(p)} (${p.age}) has signed his first professional contract and joins the first-team squad.`, "squad");
   checkAchievements({signedPlayer:true, signedFee:0});
   squadIntegrityCheck("after academy promotion");
@@ -20607,10 +20908,29 @@ try{
   });
 }catch(e){}
 
-document.getElementById("fabAdvance").addEventListener("click", ()=>{
-  if(state && state.manager && state.manager.unemployed) simUnemployedWeek();
-  else advanceWeek();
-});
+/* ONE way to move the week on, used by every button that does it.
+   The careful version of this — catch any error, refuse a second tap while a
+   week is still running — was attached to an "advanceFab" element that no
+   longer exists on the page. The button people actually press had none of it:
+   a quick double tap on a phone could start two weeks running over the same
+   data at once, and an error part-way through went uncaught. */
+let _weekInProgress = false;
+async function runAdvance(){
+  if(_weekInProgress) return;                 // a second tap while the first is still going
+  _weekInProgress = true;
+  const btn = document.getElementById("fabAdvance");
+  if(btn){ btn.disabled = true; btn.classList.add("busy"); }
+  try{
+    if(state && state.manager && state.manager.unemployed) await simUnemployedWeek();
+    else await advanceWeek();
+  }catch(e){
+    reportError("SIM-01", e, "advancing the week");
+  }finally{
+    _weekInProgress = false;
+    if(btn){ btn.disabled = false; btn.classList.remove("busy"); }
+  }
+}
+document.getElementById("fabAdvance").addEventListener("click", ()=>{ playClickSound(); runAdvance(); });
 
 /* The full-width advance bar has gone — the floating button is the only way to
    advance, on every screen and every size. Its handler is left null-safe rather
@@ -20621,8 +20941,7 @@ if(advanceFab){
     if(advanceFab.disabled) return;
     advanceFab.disabled = true; advanceFab.classList.add("busy");
     playClickSound();
-    try { await advanceWeek(); }
-    catch(e){ reportError("SIM-01", e); }
+    try { await runAdvance(); }                 // the same guarded route as every other button
     finally { advanceFab.disabled = false; advanceFab.classList.remove("busy"); }
   });
 }
@@ -20836,8 +21155,9 @@ document.getElementById("renewalDoneBtn").onclick = ()=>{
   if(expiringContracts().length) return;      // still unsettled
   playClickSound();
   document.getElementById("renewalBackdrop").classList.remove("open");
-  if(isManagerOutOfWork()) simUnemployedWeek(); // carry on into the rollover
-  else advanceWeek();
+  // Carrying on into the season rollover — the most delicate step in the game —
+  // goes through the same protected route as the advance button.
+  runAdvance();
 };
 
 document.getElementById("ownerCloseBtn").onclick = ()=>
