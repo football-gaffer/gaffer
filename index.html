@@ -3233,6 +3233,18 @@ function avatarSVG(p, size){
   </svg>`;
 }
 
+/* Real fees ease off at the top. The world record is still Neymar's €222m
+   (about £199m) from 2017, and only nineteen players have ever moved for
+   €100m or more. Below £100m nothing changes; above it, each extra pound of
+   "value" buys less and less, approaching about £220m. Without it the
+   multipliers for youth, the Premier League, trophies and a keen buyer stacked
+   on top of each other and a youngster sold for £368m. */
+const FEE_KNEE = 100000000, FEE_HEADROOM = 120000000;
+const AI_TRANSFER_SHARE = 0.45;           // the most of its balance a club spends on one player
+function easeTopFee(fee){
+  if(fee <= FEE_KNEE) return fee;
+  return Math.round(FEE_KNEE + FEE_HEADROOM * (1 - Math.exp(-(fee - FEE_KNEE) / FEE_HEADROOM)));
+}
 function playerAskingPrice(p, tierId){
   // Clubs pay for what a player will BECOME, not only what he is today. Without
   // this a 17-year-old with a 97 ceiling was available for pocket change.
@@ -3254,7 +3266,7 @@ function playerAskingPrice(p, tierId){
   const mult = TIER_TRANSFER_MULT[tierId] !== undefined ? TIER_TRANSFER_MULT[tierId] : 0.8;
   // Silverware inflates a fee — a Ballon d'Or winner is not priced like a peer
   // with the same rating and an empty trophy cabinet.
-  return Math.max(1000, Math.round(base * ageFactor * mult * awardValueMultiplier(p)));
+  return Math.max(1000, easeTopFee(Math.round(base * ageFactor * mult * awardValueMultiplier(p))));
 }
 function playerWage(p, tierId){ return Math.max(200, Math.round(playerAskingPrice(p, tierId)/1500)); }
 
@@ -4089,7 +4101,7 @@ const P_KEYS = ["id","clubId","first","last","age","pos","isReal","nat","potenti
   "isCaptain","isViceCaptain","promisedStart","finesReceived","unsettled","disciplinary","evt","awardsExtra","sponsor","stadiumName",
   // Appended, never reordered: old saves decode positionally, so anything new
   // has to go on the end where it simply reads as absent.
-  "isPenTaker","squadNo","trainFocus","caps","intGoals","lastCapSeason","renewalRefusedAt","joinedAbs","optionToBuy","agreedToJoin",
+  "isPenTaker","squadNo","trainFocus","caps","intGoals","lastCapSeason","renewalRefusedAt","joinedAbs","optionToBuy","agreedToJoin","graduatedSeason",
   // These were all being assigned and then silently dropped on every reload —
   // form and ambition since the beginning, the last three since they were added.
   "form","ambition","avatarSeed","lastRating","quitting",
@@ -4277,10 +4289,22 @@ function unpackSquads(packed){
    that localStorage will accept, and the dictionary resets before codes can
    exceed what a UTF-16 code unit holds.
    ========================================================================= */
-const LZW_MAX_CODE = 0xFBFF;          // stay clear of surrogate range
+// LZW2 (old saves): capped at 0xFBFF, which is ABOVE the surrogate range
+// 0xD800-0xDFFF, not below it as this line once claimed. Codes in that range
+// are fine in the browser's own storage but are not valid text on their own,
+// so writing the save out as a file replaced every one — 36,088 of them in one
+// real season-9 save — and the exported backup could never be loaded again.
+// Kept exactly as it was so old saves still decode.
+const LZW_MAX_CODE = 0xFBFF;
+// LZW3 (new saves): codes step AROUND the surrogate range, and stop short of
+// U+FFFD-U+FFFF, so every character is ordinary, valid text.
+const LZW3_MAX_CODE = 0xF7FC;
+function lzwCodeToChar(c){ return c < 0xD800 ? c : c + 0x800; }
+function lzwCharToCode(c){ return c < 0xD800 ? c : c - 0x800; }
 
-function lzwCompress(input){
+function lzwCompress(input, safe){
   if(!input) return "";
+  const MAX = safe ? LZW3_MAX_CODE : LZW_MAX_CODE;
   const dict = new Map();
   let nextCode = 256;
   let w = "";
@@ -4294,13 +4318,15 @@ function lzwCompress(input){
     }
     // Emit the code for w.
     out.push(dict.has(w) ? dict.get(w) : w.charCodeAt(0));
-    if(nextCode < LZW_MAX_CODE){
+    if(nextCode < MAX){
       dict.set(wc, nextCode++);
     }
     w = c;
   }
   if(w !== "") out.push(dict.has(w) ? dict.get(w) : w.charCodeAt(0));
-  // Codes are already below the surrogate range, so they map straight to chars.
+  // In safe mode every code steps around the surrogate range, so the result is
+  // valid text that survives being written to a file.
+  if(safe) for(let i=0;i<out.length;i++) out[i] = lzwCodeToChar(out[i]);
   let s = "";
   const CHUNK = 8192;
   for(let i=0;i<out.length;i+=CHUNK){
@@ -4309,21 +4335,22 @@ function lzwCompress(input){
   return s;
 }
 
-function lzwDecompress(input){
+function lzwDecompress(input, safe){
   if(!input) return "";
+  const MAX = safe ? LZW3_MAX_CODE : LZW_MAX_CODE;
   const dict = [];
   for(let i=0;i<256;i++) dict[i] = String.fromCharCode(i);
   let nextCode = 256;
   let prev = String.fromCharCode(input.charCodeAt(0));
   let out = prev;
   for(let i=1;i<input.length;i++){
-    const code = input.charCodeAt(i);
+    const code = safe ? lzwCharToCode(input.charCodeAt(i)) : input.charCodeAt(i);
     let entry;
     if(code < 256) entry = String.fromCharCode(code);
     else if(dict[code] !== undefined) entry = dict[code];
     else entry = prev + prev.charAt(0);          // the classic KwKwK case
     out += entry;
-    if(nextCode < LZW_MAX_CODE) dict[nextCode++] = prev + entry.charAt(0);
+    if(nextCode < MAX) dict[nextCode++] = prev + entry.charAt(0);
     prev = entry;
   }
   return out;
@@ -4355,12 +4382,13 @@ function fromBinaryString(bin){
 }
 
 function encodeSave(jsonString){
-  const packed = lzwCompress(toBinaryString(jsonString));
+  const packed = lzwCompress(toBinaryString(jsonString), true);
   // Only use it if it actually helped — tiny saves can round up.
-  return (packed.length < jsonString.length) ? "LZW2" + packed : jsonString;
+  return (packed.length < jsonString.length) ? "LZW3" + packed : jsonString;
 }
 function decodeSave(raw){
   if(typeof raw !== "string") return raw;
+  if(raw.indexOf("LZW3") === 0) return fromBinaryString(lzwDecompress(raw.slice(4), true));
   if(raw.indexOf("LZW2") === 0) return fromBinaryString(lzwDecompress(raw.slice(4)));
   if(raw.indexOf("LZW1") === 0) return lzwDecompress(raw.slice(4));   // older saves
   return raw;
@@ -4569,11 +4597,20 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "5.15.0";
+const GAME_VERSION = "5.18.3";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
 const VERSION_NOTES = {
+  "5.18.3": "Everything in your action list can now be dealt with from the list. Three kinds of item only pointed you elsewhere: a player asking to leave now has 'Put him up for sale' and 'Refuse'; an approach from another club has 'Not interested' (taking a job still happens on the Club screen, where you can see it properly); and injured or suspended players in your chosen XI have 'Replace them', which fills their places with fit players the same way the game's own team selection does. A check now runs on every build to make sure no kind of item can appear without something to press.",
+  "5.18.2": "A player now has one price, and one way to buy him. The market list and his own card showed his bare value, but making an offer asked up to 60% more — clubs want a premium for a man they have not put up for sale — so a price could jump the moment you tried to pay it. Worse, the Buy button on his card skipped the offer altogether and signed him on the spot at the lower figure, without his club having any say. Now the market, his card, your scouts and deals agreed out of window all show the fee you would really pay, and buying from his card opens the same offer his club considers. A deal agreed out of window now also genuinely costs more than one in the window, as intended, where before it was cheaper.",
+  "5.18.1": "Scouts now bring back players you can actually sign. Every search is 'attainable only' unless you switch it off, but that only checked whether a player would come and whether you could meet his wages — never whether you could afford his fee. So an ordinary club's scouts kept returning the best players in the world: in a test at a Championship Cardiff, all twenty of the best strikers found were beyond its budget. Now 'attainable' means you can afford him too, and all twenty could be bought. The price limit also now uses the fee you would really pay: players were priced as if they played in your division, so a Premier League player looked cheaper to a Championship club's scouts than he turned out to be. Switch 'attainable' off to see everyone, whatever they cost.",
+  "5.18.0": "Scouting now keeps finding players. A search always brought back the same top names, so repeating it — even five times over — found nothing new after the first trip, and seeing a player again added nothing to what you knew about him: in eleven trips not one player was ever fully scouted. Now a scout sent out again goes to different matches. About two-thirds of each trip is new names, the best he has not reported on before, and the rest is a second look at the best players you only partly know, which deepens those reports all the way to a full picture. Anyone you already know inside out is left off. Five repeats of one search now take you from about 60 known players to about 140, with more than twenty fully scouted, where before you stayed at 62 with none. Each trip on the Scouting screen now says how many names were new and how many were seen again.",
+  "5.17.2": "You alone choose your academy graduates. The end-of-season summary listed the new intake under the heading 'Academy graduates', so the same boys appeared there and as new arrivals on the Academy screen, as though the game were picking graduates for you. They are two different things: boys come UP into the academy from the junior sides, and graduate OUT of it into your first team only when you promote them. The summary now shows both, separately — the boys you promoted that season as your graduates, and the boys who joined the academy. If you promoted nobody, it says so.",
+  "5.17.1": "A buy-back alert can no longer get stuck. It warned that a former club could take a player back, but gave you nothing to do about it, so it sat in your action list for good. You can now buy the clause out: the former club tears it up in return for half the bargain it would be giving up. The deeper cause is fixed too — only two of the twelve ways a player can move used to clear his old clauses, so a buy-back could follow a player through several clubs and turn up years later, held by a club with no real claim on him. A clause now belongs to the one deal that made it and lapses when the player moves on permanently; loans leave them alone, since a loanee still belongs to his parent club.",
+  "5.17.0": "Transfer fees now stay within real-world reason. The world record is still the £199m Paris Saint-Germain paid for Neymar in 2017, and only nineteen players have ever moved for £100m or more — but here the premiums for youth, the Premier League, trophies and an eager buyer stacked on top of one another, and youngsters were sold for up to £368m. Fees below £100m are unchanged; above that they rise ever more slowly towards about £220m. Clubs bidding for your players also now follow the rule every other deal in the game already follows, spending no more than 45% of their bank balance on one player — before, a club could bid almost everything it had. Your existing balance is untouched. Selling the players you develop is still the richest way to run a club, just at believable prices.",
+  "5.16.0": "Exported backups now work. Saves are compressed into codes stored as characters, and past a certain size some of those codes fell in a range of characters that cannot exist on their own in a text file. Your browser keeps them intact, so the game always loaded normally — but exporting a career to a file replaced every one of them, and the backup could never be loaded again. Even a brand-new career produced about twenty-five thousand of them, so an exported backup of any real save has never worked. Saves now use a format that steps around that range entirely, the export writes your save fresh in that format, and an exported file now loads back exactly. Your current save is safe and loads as before; export it again from this version for a backup that works. Importing an old damaged backup now tells you what happened instead of simply failing.",
+  "5.15.1": "An academy boy you leave unsigned past 18 now really goes somewhere. The news always said he had left for a club offering professional terms, but he was simply deleted from the game. He now joins a club at a level that suits his ceiling, and the news names it — so you can follow him, buy him back later, or watch him come back to haunt you. If no club has room, he becomes a free agent and the news says so.",
   "5.15.0": "Young players now get a career instead of vanishing. Every other club took on three youngsters a year however full its squad was, so a full club released them straight back out and they were cut from the free-agent pool almost at once — by the third summer, a quarter of all the teenagers the game created were gone again before that same summer ended, more than five hundred a year. Clubs now take on scholars for the places they actually have; retirements free a place or two most summers, so young players keep coming through. Over ten seasons half as many young players leave the game, the typical age for leaving has risen to 33 as more players finish full careers, and the divisions stay just as level. Your own academy is unchanged.",
   "5.14.1": "Players now leave the professional game for a reason. One free agent in ten used to be removed every summer at random, whatever his age, so a 23-year-old or a 27-year-old in his prime could simply vanish. Now veterans retire, more likely with each year past 30, and a younger man drifts into non-league only after two summers without a club. The 5.14.0 note has also been corrected: your own academy is pitched to your division as well, a few points lower below the Premier League, with the rare gem unchanged.",
   "5.14.0": "The football world now stays the same shape however long you play. Academies scaled a boy's starting ability to his club's division but not his ceiling, so a National League academy produced boys with the same ceilings as a Premier League one. Each generation outgrew the one it replaced, and the lower divisions crept upward every season without end: over ten seasons the National League rose from a typical player of 58 to 66, League Two from 63 to 69, and both were still climbing — in a long career the whole pyramid would have flattened. An academy's ordinary products are now pitched just above its own division's level. Over the same ten seasons every division now levels off within a few points of where it started. A genuine gem can still come from any club. Your own academy is pitched to your division too: its ordinary and good boys have ceilings a few points lower than before below the Premier League, while the rare gem is unchanged.",
@@ -6169,7 +6206,7 @@ function runAITransferWindow(){
   const buyers = allClubs.slice().sort((a,b)=> leagueRank(b) - leagueRank(a));
 
   buyers.forEach(buyer=>{
-    const budget = buyer.balance * 0.45;
+    const budget = buyer.balance * AI_TRANSFER_SHARE;
     if(budget < 50000) return;
     const squad = state.squads[buyer.id];
     if(!squad || squad.length===0) return;
@@ -6222,6 +6259,7 @@ function runAITransferWindow(){
 
     // Execute
     state.squads[deal.seller.id] = state.squads[deal.seller.id].filter(p=>p.id!==deal.target.id);
+    clearClausesOnMove(deal.target);
     deal.target.clubId = buyer.id;
     // Fresh terms on a transfer, same as the player's own club does — otherwise
     // a bought player carries the selling club's remaining years across and can
@@ -8137,11 +8175,41 @@ function submitOffer(p, kind, fee, extras){
    in his first half-season with you, and only once he has become a bargain at
    that price. The fee was set at 1.6 to 2.6 times what you paid, so you make
    money even as you lose him. */
+/* A clause belongs to ONE deal. When a player changes club permanently, the
+   clauses from his previous moves no longer bind anyone — only two of the
+   game's twelve ways of moving a player used to clear them, so a buy-back could
+   follow a player through several clubs and turn up years later, held by a club
+   with no real claim on him. Loans do not clear them: a loanee still belongs
+   to his parent club, and so do its agreements. */
+function clearClausesOnMove(p){ if(p) p.clauses = []; }
+
+/* What it costs to have a former club tear up its buy-back: half of the bargain
+   it would be giving up, and never less than a tenth of the clause itself. */
+function buyBackBuyoutFee(live){
+  return Math.max(Math.round(live.clause.fee * 0.10), Math.round((live.value - live.clause.fee) * 0.5));
+}
+function buyOutBuyBack(playerId){
+  const p = (state.squads[state.clubId]||[]).find(x=> x.id === playerId);
+  if(!p) return {ok:false, reason:"He is not in your squad."};
+  const live = buyBackIsLive(p);
+  if(!live) return {ok:false, reason:"There is no buy-back on him to buy out."};
+  const fee = buyBackBuyoutFee(live);
+  const club = clubById(state.clubId);
+  if(club.balance < fee) return {ok:false, reason:`Buying out the clause costs ${fmtMoney(fee)} — more than the club has.`};
+  club.balance -= fee; live.former.balance += fee;
+  p.clauses = (p.clauses||[]).filter(x=> x !== live.clause);
+  pushNews("Buy-back clause removed",
+    `${live.former.name} have agreed to tear up their buy-back on ${fullName(p)} for ${fmtMoney(fee)}. He is yours outright.`, "transfer");
+  saveState(true);
+  return {ok:true, fee, former:live.former};
+}
+
 function buyBackIsLive(p){
   const c = (p.clauses||[]).find(x=> x.type === "buyBack");
   if(!c) return null;
   const former = clubById(c.club);
   if(!former || former.hidden) return null;
+  if(former.id === p.clubId) return null;          // nobody holds a buy-back on his own player
   const value = playerAskingPrice(p, (clubById(state.clubId)||{}).tier);
   if(value <= c.fee) return null;                    // not yet a bargain for them
   const nowAbs = state.season * CALENDAR_WEEKS + state.week;
@@ -8507,8 +8575,11 @@ function generateIncomingOffers(){
     if(Math.random() > baseChance * (0.5 + quality)) return;
 
     // Find a plausible suitor: a club that can afford him and would want him.
+    // The same rule AI clubs follow with each other: never more than 45% of
+    // the bank on one player. Bidders for YOUR players could spend the lot,
+    // which is how Rayo Vallecano bid £116m from a £122m balance.
     const candidates = Object.values(CLUB_META).filter(c=>
-      c.id!==state.clubId && !c.hidden && c.balance > playerAskingPrice(p, myClub.tier)*1.1);
+      c.id!==state.clubId && !c.hidden && c.balance * AI_TRANSFER_SHARE > playerAskingPrice(p, myClub.tier));
     if(candidates.length===0) return;
     const buyer = pick(candidates);
 
@@ -8530,8 +8601,8 @@ function generateIncomingOffers(){
     if(p.joinedAbs && nowAbs - p.joinedAbs < 20) return;
     const market = playerAskingPrice(p, myClub.tier);
     // Bids vary: some lowball, some over the odds if they're desperate.
-    const fee = Math.max(1000, Math.round(market * rnd(p.listed ? 0.72 : 0.95, p.listed ? 1.05 : 1.35)));
-    if(buyer.balance < fee) return;
+    const fee = Math.max(1000, easeTopFee(Math.round(market * rnd(p.listed ? 0.72 : 0.95, p.listed ? 1.05 : 1.35))));
+    if(buyer.balance * AI_TRANSFER_SHARE < fee) return;
 
     state.offers.push({playerId:p.id, clubId:buyer.id, fee, ask:market,
       patience:3, counterRounds:0, week:state.week, season:state.season});
@@ -9017,12 +9088,16 @@ const LISTED_DISCOUNT = 0.68;
 
 function isFreeAgent(p){ return p.clubId === "__free__"; }
 
+/* What another club's player will actually cost you — ONE figure, used by the
+   market list, the player card, scouting and deals agreed out of window. It is
+   the same fee the bid panel asks (negotiatedFee): the seller's division, a
+   discount if he is listed, and the premium a club wants for a man it has not
+   put up for sale. Before, the market list and the card showed his bare value
+   while the bid panel asked up to 60% more, and the card's Buy button signed
+   him instantly at the lower figure without his club having any say. */
 function effectivePrice(p){
-  const club = clubById(p.clubId);
   if(isFreeAgent(p)) return 0;
-  const tier = club && TIER_TRANSFER_MULT[club.tier] !== undefined ? club.tier : "leagueone";
-  const base = Math.max(1000, playerAskingPrice(p, tier));
-  return p.listed ? Math.max(1000, Math.round(base * LISTED_DISCOUNT)) : base;
+  return Math.max(1000, negotiatedFee(p, "buy"));
 }
 
 // Loan fee is a token amount; the real cost is that you don't own him.
@@ -10649,6 +10724,7 @@ function isLoanable(p, myClub){
 
 /* ---- Free agent pool ---- */
 function releaseToFreeAgents(p){
+  clearClausesOnMove(p);             // a released player is bound by nobody's clause
   // Detach from whichever squad still holds him. A player sitting in a squad
   // array AND the free agent pool is the same object in two places, and the
   // next save writes one side's clubId over the other.
@@ -10866,6 +10942,7 @@ function claimFreeAgents(){
       if(patienceLost < 2 && !signingInterest(p, c, "free").willing) continue;
       if(!canAffordWages(c, p).ok) continue;
       state.freeAgents = state.freeAgents.filter(x=> x !== p && x.id !== p.id);
+      clearClausesOnMove(p);
       p.clubId = c.id;
       p.loanedFrom = null;
       p.listed = false;
@@ -10917,6 +10994,7 @@ function exerciseLoanOption(playerId){
   const parent = clubById(p.loanedFrom);
   club.balance -= fee;
   if(parent) parent.balance += fee;
+  clearClausesOnMove(p);             // now yours outright: his old clauses lapse
   p.loanedFrom = null;
   p.optionToBuy = null;
   p.contractYears = defaultContractYears(p);
@@ -11027,6 +11105,7 @@ function signFreeAgent(player){
   // Strip him from the pool by identity *and* id, so no stale copy is left
   // behind for the next save to write "__free__" onto.
   state.freeAgents = (state.freeAgents||[]).filter(p=> p !== player && p.id !== player.id);
+  clearClausesOnMove(player);
   player.clubId = club.id;
   player.listed = false;
   // Terms are part of the signing. Leaving these unset meant a new arrival
@@ -12047,6 +12126,7 @@ function buyPlayer(player, overridePrice, opts){
     if(!interest.willing) return {ok:false, reason:`${fullName(player)} ${interest.reason}.`};
   }
   buyer.balance -= price; seller.balance += price;
+  clearClausesOnMove(player);          // this deal's own clauses are added after
   state.squads[seller.id] = state.squads[seller.id].filter(p=>p.id!==player.id);
   player.clubId = buyer.id;
   player.listed = false;
@@ -13025,7 +13105,7 @@ const ERROR_AREAS = {
   "SQD-01":"Squad ledger — unexplained departure", "SQD-02":"Squad ledger", "SQD-03":"Squad roles", "TAC-01":"Custom formations",
   "YTH-01":"Youth scouting", "YTH-02":"Youth intake report", "STF-01":"Backroom staff", "INT-01":"International break",
   "SCT-02":"Club scouting network", "SCT-03":"Seasonal club scouting",
-  "SIM-06":"Midweek fixture stats", "SIM-07":"AI fatigue", "SIM-05":"Penalty shootout", "TRF-10":"Settling agreed deals",
+  "SIM-06":"Midweek fixture stats", "SIM-07":"AI fatigue", "SAV-05":"Export re-encode", "SIM-05":"Penalty shootout", "TRF-10":"Settling agreed deals",
   "TRF-14":"Transfer market maintenance", "TRF-15":"Buy-back clauses",
 };
 
@@ -15433,7 +15513,9 @@ function openPlayerModal(p, isOwn){
     ? [["Pace",p.pace],["Passing",p.passing],["Shooting",p.shooting],["Defending",p.defending],["Physical",p.physical],["Morale",p.morale]]
     : [["Pace",vague(p.pace)],["Passing",vague(p.passing)],["Shooting",vague(p.shooting)],
        ["Defending",vague(p.defending)],["Physical",vague(p.physical)]].filter(a=> a[1] !== null);
-  const price = playerAskingPrice(p, club.tier);
+  // Your own players are valued in your division; another club's are shown at
+  // what they would actually cost you to prise away.
+  const price = p.clubId === state.clubId ? playerAskingPrice(p, club.tier) : effectivePrice(p);
   body.innerHTML = `
     <div style="display:flex; align-items:center; gap:14px; margin-bottom:14px;">
       ${avatarSVG(p,64)}
@@ -15745,7 +15827,7 @@ function openPlayerModal(p, isOwn){
          <div style="text-align:center; font-size:11.5px; color:var(--text-dim); margin-top:4px;">He would join the day it opens, in ${wait} week${wait===1?"":"s"}. Clubs charge more to commit early.</div>`;
     actionArea.insertAdjacentHTML("afterbegin", `
       <button class="btn-primary" id="buyBtn" style="margin-top:16px;"${open?"":" disabled"}>${
-        open ? `Buy for ${fmtMoney(price)}` : `Window shut — reopens in ${wait} week${wait===1?"":"s"}`}</button>
+        open ? `Make an offer — around ${fmtMoney(price)}` : `Window shut — reopens in ${wait} week${wait===1?"":"s"}`}</button>
       ${futureHTML}
       <div id="buyMsg" style="text-align:center; font-size:12.5px; color:var(--bad); margin-top:8px;"></div>`);
     const futureBtn = document.getElementById("futureBtn");
@@ -15770,8 +15852,11 @@ function openPlayerModal(p, isOwn){
         document.getElementById("buyMsg").textContent = "The transfer window is shut.";
         return;
       }
-      const res = buyPlayer(p);
-      if(res.ok){ closePlayerModal(); render(); } else { document.getElementById("buyMsg").textContent = res.reason; }
+      // One way to buy: make an offer his club considers, exactly as from the
+      // market. This used to sign him on the spot at a lower price than the
+      // market asked, with no say for the selling club.
+      closePlayerModal();
+      openMarketModal(p, "buy", effectivePrice(p));
     };
   }
   document.getElementById("playerBackdrop").classList.add("open");
@@ -16847,7 +16932,18 @@ function showSeasonSummary(result){
       ${result.growthLog.slice().sort((a,b)=>b.change-a.change).slice(0,6).map(g=>
         `<div class="youth-item"><span>${flagFor(g.player.nat)} ${fullName(g.player)} · age ${g.player.age}</span>
         <span class="num" style="color:${g.change>0?'var(--good)':'var(--bad)'};">${g.change>0?'+':''}${to100(g.player.overall)-to100(g.player.overall-g.change)} → ${to100(g.player.overall)}</span></div>`).join("")}` : ""}
-    <div class="section-title">Academy graduates (${result.youthLog.length})</div>
+    ${(()=>{
+      // Graduates are the boys YOU promoted this season — nobody else decides.
+      // This section used to show the new intake under the heading "Academy
+      // graduates", so the same boys appeared here and as new arrivals on the
+      // Academy screen, as though the game chose your graduates for you.
+      const justEnded = state.season - 1;
+      const grads = (state.squads[state.clubId]||[]).filter(p=> p.graduatedSeason === justEnded);
+      return `<div class="section-title">Academy graduates (${grads.length})</div>` + (grads.length
+        ? grads.map(p=>`<div class="youth-item"><span>${flagFor(p.nat)} ${fullName(p)} · ${positionsOf(p).join("/")} · age ${p.age}</span><span class="num">${ratingOf(p)}</span></div>`).join("")
+        : `<div class="youth-item"><span>You promoted nobody this season. Graduates are your call — promote a boy from the Academy screen when he is ready.</span></div>`);
+    })()}
+    <div class="section-title">Joined the academy (${result.youthLog.length})</div>
     ${result.youthLog.map(p=>{
       const pot = potentialOf(p), cur = ratingOf(p);
       // A wonderkid is defined by the ceiling he reaches, not the distance he
@@ -16857,7 +16953,7 @@ function showSeasonSummary(result){
       return `<div class="youth-item"><span>${flagFor(p.nat)} ${fullName(p)} · ${positionsOf(p).join("/")} · age ${p.age}${
         gem?' <span class="wk-tag">★ WONDERKID</span>':''}</span><span class="num">${cur}${
         pot>cur?` <span style="color:var(--good);">▲${pot}</span>`:''}</span></div>`;
-    }).join("") || '<div class="youth-item"><span>No graduates this year</span></div>'}
+    }).join("") || '<div class="youth-item"><span>No boys came up from the junior sides this year</span></div>'}
     ${(result.shadowChanges||[]).length ? `<div class="section-title">Around Europe</div>
       ${result.shadowChanges.map(ch=>`<div class="youth-item" style="display:block;">
         <div style="font-size:11.5px; color:var(--text-dim);">${leagueDisplayName(ch.leagueId)}</div>
@@ -17523,8 +17619,12 @@ function collectActions(){
     if(!live) return;
     acts.push({group:"Transfers", icon:"\u26A0\uFE0F",
       title:`${live.former.name} could buy back ${fullName(p)}`,
-      sub:`He is now worth ${fmtMoney(live.value)}; their buy-back is ${fmtMoney(live.clause.fee)}. They can take him in any open window.`,
-      go:"squad", player:p.id, buttons:[]});
+      sub:`He is now worth ${fmtMoney(live.value)}; their buy-back is ${fmtMoney(live.clause.fee)}. They can take him in any open window — unless you buy the clause out.`,
+      go:"squad", player:p.id,
+      buttons:[{label:`Buy out for ${fmtMoney(buyBackBuyoutFee(live))}`, run:()=>{
+        const r = buyOutBuyBack(p.id);
+        return r.ok ? `${r.former.name} tear up the buy-back — ${fullName(p)} is yours outright` : r.reason;
+      }}]});
   });
 
   // --- Loans with an option to buy -------------------------------------
@@ -17621,7 +17721,11 @@ function collectActions(){
     const p = playerById(r.playerId);
     if(!p) return;
     acts.push({group:"Squad", icon:"✋", title:`${fullName(p)} has asked to leave`,
-      sub:r.reason || "He wants a move.", go:"squad", player:p.id});
+      sub:r.reason || "He wants a move.", go:"squad", player:p.id,
+      buttons:[
+        {label:"Put him up for sale", run:()=>{ resolveTransferRequest(p.id, true); return `${fullName(p)} is on the transfer list`; }},
+        {label:"Refuse", danger:true, run:()=>{ resolveTransferRequest(p.id, false); return `${fullName(p)} has been told he is staying`; }},
+      ]});
   });
 
   // --- Unsettled players -------------------------------------------------
@@ -17795,7 +17899,8 @@ function collectActions(){
     const c = clubById(o.clubId);
     if(!c) return;
     acts.push({group:"You", icon:"📞", title:`${c.name} want to speak to you`,
-      sub:`${tierName(c.tier)} · they are looking for a manager.`, go:"club"});
+      sub:`${tierName(c.tier)} · they are looking for a manager. Tap to consider it on the Club screen.`, go:"club",
+      buttons:[{label:"Not interested", danger:true, run:()=>{ declineJob(o.clubId); return `You turn down ${c.name}`; }}]});
   });
 
   // --- Selection problems -------------------------------------------------
@@ -17804,7 +17909,11 @@ function collectActions(){
       .filter(p=> p && !isAvailable(p));
     if(unfit.length){
       acts.push({group:"Squad", icon:"⚠️", title:`${unfit.length} unavailable player${unfit.length>1?"s":""} in your XI`,
-        sub: unfit.map(p=>fullName(p)).join(", ") + " — pick a replacement.", go:"squad"});
+        sub: unfit.map(p=>fullName(p)).join(", ") + " — pick a replacement.", go:"squad",
+        buttons:[{label:"Replace them", run:()=>{
+          state.lineup = autoPickXI(sq, state.tactics.formation).map(x=>x.id);
+          return "Your XI has been updated with fit players";
+        }}]});
     }
   }
   return acts;
@@ -18229,7 +18338,8 @@ function openScouting(){
       }
       const names = (r.ids||[]).map(id=>{ const p=findPlayerAnywhere(id); return p?fullName(p):null; }).filter(Boolean);
       return `<div class="scout-row"><span class="sr-body">
-        <span class="sr-title">${names.length} name${names.length===1?"":"s"} brought back</span>
+        <span class="sr-title">${names.length} name${names.length===1?"":"s"} brought back${
+          (r.fresh||r.deepened) ? ` · ${r.fresh||0} new, ${r.deepened||0} seen again` : ""}</span>
         <span class="sr-sub">${names.slice(0,6).join(", ")}</span></span></div>`;
     }).join("");
     host.appendChild(rep);
@@ -18476,7 +18586,12 @@ function openDiagnostics(){
         const club = clubById(state.clubId);
         const name = "gaffer-" + ((club&&club.name)||"career").toLowerCase().replace(/[^a-z0-9]+/g,"-") +
                      "-s" + state.season + "w" + state.week + ".txt";
-        const blob = new Blob([raw], {type:"text/plain"});
+        // Written FRESH in the safe format, never copied from storage: a save
+        // still held in the old format would otherwise carry the characters
+        // that ruin a file.
+        let safeText = raw;
+        try{ safeText = encodeSave(decodeSave(raw)); }catch(e){ reportError("SAV-05", e, "export re-encode"); }
+        const blob = new Blob([safeText], {type:"text/plain"});
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
         a.download = name;
@@ -18505,7 +18620,11 @@ function openDiagnostics(){
       try{
         const text = (await f.text()).trim();
         // Prove it parses before letting it near the live slot.
-        const probe = JSON.parse(decodeSave(text));
+        if(text.indexOf("LZW2") === 0 && text.indexOf("\uFFFD") !== -1){
+        toast("This backup was damaged when it was exported, by a fault in older versions of the game, and can't be restored. Your game in this browser is unaffected — export it again from this version for a backup that works.", 9000);
+        return;
+      }
+      const probe = JSON.parse(decodeSave(text));
         if(!probe || !probe.game) throw new Error("not a Gaffer career file");
         window.localStorage.setItem(STORAGE_KEY, text);
         toast("Career imported — reloading", 2600);
@@ -19365,12 +19484,17 @@ function tickScouting(){
     const elapsed = (state.season - a.season) * CALENDAR_WEEKS + (state.week - a.due);
     if(elapsed < 0) return true;
     const found = runAssignment(a);
+    let fresh = 0, deepened = 0;
     found.forEach(p=>{
       const cur = sc.reports[p.id] ? sc.reports[p.id].level : 0;
-      if(cur < 1) sc.reports[p.id] = {level:1, week:state.week, season:state.season};
-      recordClubScoutReport(p.id, Math.max(1, cur));
+      // A new name is filed at the first level; seeing a man again deepens
+      // what you know about him, all the way to a full report.
+      const lvl = Math.min(3, cur + 1);
+      if(cur === 0) fresh++; else deepened++;
+      sc.reports[p.id] = {level:lvl, week:state.week, season:state.season};
+      recordClubScoutReport(p.id, lvl);
     });
-    done.push({kind:"assignment", brief:a, found:found});
+    done.push({kind:"assignment", brief:a, found:found, fresh, deepened});
     // If this assignment is set to auto-repeat and scout quality is high enough, re-queue it
     if(a.isAuto && scoutQuality() >= 4){
       const weeks = clamp(7 - scoutQuality(), 3, 6);
@@ -19386,6 +19510,7 @@ function tickScouting(){
       playerId: d.player ? d.player.id : null,
       level: d.level || 1,
       ids: d.found ? d.found.map(x=>x.id) : [],
+      fresh: d.fresh || 0, deepened: d.deepened || 0,
       brief: d.brief || null,
       week: state.week, season: state.season,
     })));
@@ -19426,13 +19551,20 @@ function runAssignment(a){
       const c = clubById(p.clubId);
       if(!c || c.tier !== a.tier) return false;
     }
-    if(a.maxPrice){
-      const price = isFreeAgent(p) ? 0 : playerAskingPrice(p, me.tier);
-      if(price > a.maxPrice) return false;
-    }
+    // The fee a purchase actually charges is priced in the SELLER's division
+    // (see buyPlayer). This used to price him in yours, so a Championship club
+    // was shown a Premier League player's cheaper price and then asked for the
+    // dearer one.
+    const fee = effectivePrice(p);         // what you would actually pay
+    if(a.maxPrice && fee > a.maxPrice) return false;
     if(a.attainableOnly){
       const av = playerAvailability(p, me);
       if(av.status === "unattainable") return false;
+      // ...and one you can actually pay for. "Attainable" checked that he would
+      // come and that you could meet his wages, but never the FEE — so every
+      // default search (attainable is on by default) sent an ordinary club's
+      // scouts to players it could never afford: 20 out of 20 in a test.
+      if(fee > me.balance) return false;
     }
     return true;
   });
@@ -19444,7 +19576,23 @@ function runAssignment(a){
   const score = a.looking === "prospects"
     ? p=> potentialOf(p) * 1.0 + (potentialOf(p) - ratingOf(p)) * 0.8 - Math.max(0, p.age - 21) * 3
     : p=> ratingOf(p) + potentialOf(p) * 0.35;
-  return matches.sort((x,y)=> score(y) - score(x)).slice(0, take);
+  /* A scout sent out again goes to different matches. This used to return the
+     same top names every time — the same search repeated five times found
+     nothing new after the first trip, and seeing a player again added nothing
+     to what you knew. Now about two-thirds of a trip is NEW names, the best he
+     has not reported on before, and the rest is a second look at the best men
+     you only partly know, which deepens those reports. Anyone you already know
+     inside out is left off: there is nothing more to learn about him. */
+  const reports = scoutState().reports;
+  const level = p=> reports[p.id] ? reports[p.id].level : 0;
+  const ranked = matches.filter(p=> level(p) < 3).sort((x,y)=> score(y) - score(x));
+  const fresh = ranked.filter(p=> level(p) === 0);
+  const seen  = ranked.filter(p=> level(p) > 0);
+  const wantSeen  = Math.min(seen.length, Math.round(take / 3));
+  const wantFresh = Math.min(fresh.length, take - wantSeen);
+  return fresh.slice(0, wantFresh)
+    .concat(seen.slice(0, take - wantFresh))
+    .sort((x,y)=> score(y) - score(x));
 }
 
 /* =========================================================================
@@ -19659,6 +19807,34 @@ function developProspect(p){
 
 // Season rollover. Everyone in the academy is a year older and, with luck and
 // a good setup, a year better. Anyone who reaches eighteen needs a decision.
+/* A boy leaving your academy unsigned, placed at a club that would take him:
+   one with room, in the division his ceiling suits. Never your own club, never
+   a hidden shadow-league side. Returns {p, club} — club is null if he could
+   only become a free agent. */
+function placeReleasedYouth(p){
+  const ceil = potentialOf(p);
+  const tier = ceil >= 80 ? "championship" : ceil >= 72 ? "leagueone"
+             : ceil >= 66 ? "leaguetwo" : "nationalleague";
+  const pool = ((state.tiers && state.tiers[tier] && state.tiers[tier].clubIds) || [])
+    .map(id=> clubById(id))
+    .filter(c=> c && c.id !== state.clubId && !c.hidden &&
+                (state.squads[c.id] || []).length < SQUAD_MAX - 2);
+  p.isAcademy = false;
+  p.isYouth = true;
+  p.listed = false;
+  if(!pool.length){
+    p.clubId = state.clubId;               // so releaseToFreeAgents can detach cleanly
+    releaseToFreeAgents(p);
+    return {p, club:null};
+  }
+  const club = pool[Math.floor(Math.random() * pool.length)];
+  p.clubId = club.id;
+  p.contractYears = defaultContractYears(p);
+  p.wage = wageDemand(p);
+  state.squads[club.id].push(p);
+  return {p, club};
+}
+
 function ageAcademy(){
   const ac = academyState();
   const kickedOn = [];
@@ -19676,10 +19852,19 @@ function ageAcademy(){
     if(p.age > ACADEMY_PRO_AGE){ walked.push(p); return false; }
     return true;
   });
+  // They really do go somewhere. The news always said they had left for a club
+  // offering professional terms, but they were simply deleted — a boy you let
+  // go could never be followed, bought back, or come back to haunt you. Each now
+  // joins a club at a level that suits his ceiling; if none has room, he is a
+  // free agent, and the news says which.
   if(walked.length){
+    const went = walked.map(p=> placeReleasedYouth(p));
+    const joined = went.filter(w=> w.club), free = went.filter(w=> !w.club);
     pushNews("Academy players leave",
-      `${walked.map(fullName).join(", ")} ${walked.length===1?"has":"have"} left for a club willing to offer professional terms. ` +
-      `${walked.length===1?"He was":"They were"} waiting on your decision for a full season.`, "board");
+      joined.map(w=> `${fullName(w.p)} has joined ${w.club.name} on professional terms`).join(". ") +
+      (joined.length && free.length ? ". " : "") +
+      free.map(w=> `${fullName(w.p)} is a free agent`).join(". ") +
+      `. ${walked.length===1?"He was":"They were"} waiting on your decision for a full season.`, "board");
   }
   // A shortlist goes stale — those boys sign elsewhere over the summer.
   const ys = youthScoutState();
@@ -19783,6 +19968,7 @@ function promoteFromAcademy(playerId){
   // may run longer than three years (FIFA RSTP art. 18.2) — this gave a
   // 16-year-old four.
   const scholar = p.age < 17;
+  p.graduatedSeason = state.season;    // a graduate is a boy YOU chose to promote
   // Scholars are on the set scholarship wage, the same at every club: £165 a
   // week in the first year (Premier League and EFL). Scaling it by his
   // potential paid one 16-year-old nearly £4,000 a week. From 17 he is on a
