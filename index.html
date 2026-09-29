@@ -4597,11 +4597,17 @@ function decodeSave(raw){
           renewal gate; fitness recovery; free agent gating; loans fixed;
           counter-offers; clean sheet stat; toast laddering
    ------------------------------------------------------------------------- */
-const GAME_VERSION = "5.18.3";
+const GAME_VERSION = "5.18.9";
 const VERSION_KEY = "gaffer_version_seen";
 
 // Shown once after updating, so a player knows what changed under them.
 const VERSION_NOTES = {
+  "5.18.9": "Fines now need a reason. Every player's card offered to fine him a week's or two weeks' wages at any time, so you could fine the whole squad over and over for doing nothing and bank the money. Now a player can only be fined for an offence — being sent off, or getting into trouble off the pitch — once for that offence, and within a few weeks of it. His card tells you what he did.",
+  "5.18.8": "Cup prize money now goes to the winners. Every round paid its full prize to both sides, so being knocked out in the quarter-finals earned exactly what the team that beat you did. It now follows the real FA Cup: the winner of a tie takes the full prize, losers in the early rounds get a small consolation, losers in the middle rounds get nothing, and beaten semi-finalists and finalists get half. The same applies to cups abroad, and a defeat no longer tells you about prize money you did not receive.",
+  "5.18.7": "Promising a player a start now works fairly. A promise made with the 'Promise him a start' button was stored in a different form from one made in conversation, and the check could not read it — so it could be judged broken the very next week, leaving him furious however you picked him, and his card said 'until week undefined'. There is now one kind of promise. He is also judged only on the games since you made it, not his whole season, so starting him in every match after a mid-season promise now counts as keeping your word. A promise that runs into a new season lapses instead of being judged on last season's games.",
+  "5.18.6": "Lending a player out now saves you money. When you borrowed a player you paid 65% of his wages and his club paid the rest — but when you lent one out, you kept paying every penny while another club played him. The same rule now works both ways: the club that borrows your player pays 65% of his wages, your wage bill drops by that much, and the room frees up in your budget for signings. When he comes back, you pay him in full again.",
+  "5.18.5": "A bid that is accepted but cannot go through is now explained. If a club accepted your offer but the signing then failed — your squad was full, his wages broke your budget, or the money had gone by the time it completed — the bid simply disappeared and the player never arrived, with no message at all. You now get 'Deal fell through', telling you why, so you can sort it and bid again.",
+  "5.18.4": "The transfer market's filters now do what they say. Sorting by rating or potential used every player's true hidden ability, scouted or not, so the best unscouted players rose straight to the top and gave away exactly what scouting is meant to keep hidden. Sorting now uses only what you can see — exact figures where you know a player, the middle of his estimate where you have one — and lists unscouted players after them, by name. 'Affordable only' also now checks his wages as well as the fee, as the transfer itself does; before, an 'affordable' player could still be refused because your board would not pay what he earns.",
   "5.18.3": "Everything in your action list can now be dealt with from the list. Three kinds of item only pointed you elsewhere: a player asking to leave now has 'Put him up for sale' and 'Refuse'; an approach from another club has 'Not interested' (taking a job still happens on the Club screen, where you can see it properly); and injured or suspended players in your chosen XI have 'Replace them', which fills their places with fit players the same way the game's own team selection does. A check now runs on every build to make sure no kind of item can appear without something to press.",
   "5.18.2": "A player now has one price, and one way to buy him. The market list and his own card showed his bare value, but making an offer asked up to 60% more — clubs want a premium for a man they have not put up for sale — so a price could jump the moment you tried to pay it. Worse, the Buy button on his card skipped the offer altogether and signed him on the spot at the lower figure, without his club having any say. Now the market, his card, your scouts and deals agreed out of window all show the fee you would really pay, and buying from his card opens the same offer his club considers. A deal agreed out of window now also genuinely costs more than one in the window, as intended, where before it was cheaper.",
   "5.18.1": "Scouts now bring back players you can actually sign. Every search is 'attainable only' unless you switch it off, but that only checked whether a player would come and whether you could meet his wages — never whether you could afford his fee. So an ordinary club's scouts kept returning the best players in the world: in a test at a Championship Cardiff, all twenty of the best strikers found were beyond its budget. Now 'attainable' means you can afford him too, and all twenty could be bought. The price limit also now uses the fee you would really pay: players were priced as if they played in your division, so a Premier League player looked cheaper to a Championship club's scouts than he turned out to be. Switch 'attainable' off to see everyone, whatever they cost.",
@@ -7281,10 +7287,11 @@ function advanceNationalCup(nationId){
         recordQuickStats(b, res.ag, res.hg);
       }
       if(a===state.clubId || b===state.clubId){
-        // Prize money scales with how far you've gone.
-        const prize = Math.round(40000 * Math.pow(2.1, cup.round));
+        // Prize money scales with how far you've gone — and goes to the winner.
+        const won = res.winner === state.clubId;
+        const prize = cupRoundPrize(Math.round(40000 * Math.pow(2.1, cup.round)), cup.round, cup.pairings.length, won);
         clubById(state.clubId).balance += prize;
-        userTie = {a, b, hg:res.hg, ag:res.ag, prize, round:cup.round};
+        userTie = {a, b, hg:res.hg, ag:res.ag, prize, won, round:cup.round};
       }
     }
   });
@@ -8287,7 +8294,7 @@ const LIFE_EVENTS = [
     apply:(p)=>{ p.morale = clamp(p.morale - 5, 1, 20); p.unsettled = true;
       return `${fullName(p)} has been struggling to settle and wants to be closer to home.`; }},
   { id:"offFieldTrouble", weight:6, minAge:19,
-    apply:(p)=>{ p.morale = clamp(p.morale - 6, 1, 20); p.disciplinary = (p.disciplinary||0)+1;
+    apply:(p)=>{ p.morale = clamp(p.morale - 6, 1, 20); p.disciplinary = (p.disciplinary||0)+1; recordOffence(p, "in trouble off the pitch");
       return `${fullName(p)} has been disciplined by his club over off-field conduct.`; }},
   { id:"personalIssues", weight:7, minAge:20,
     apply:(p)=>{
@@ -8917,9 +8924,17 @@ function wageDemand(p){
 }
 
 // Total weekly wage bill for a club.
+/* The share of a loanee's wages paid by the club that BORROWS him. The same
+   rule both ways: borrow a player and you pay this share; lend one and the
+   club taking him pays it. Lending used to change nothing — you kept paying
+   every penny while another club played him. */
+const LOAN_WAGE_SHARE = 0.65;
 function wageBill(clubId){
   const sq = state.squads[clubId] || [];
-  return sq.reduce((s,p)=> s + (p.wage || wageDemand(p)), 0);
+  return sq.reduce((s,p)=>{
+    const w = p.wage || wageDemand(p);
+    return s + (p.loanedOutTo ? Math.round(w * (1 - LOAN_WAGE_SHARE)) : w);
+  }, 0);
 }
 
 // The board's weekly wage allowance, from income rather than the bank balance.
@@ -9251,6 +9266,7 @@ function applyMatchDiscipline(clubId, isUserClub){
     }
     if(Math.random() < 0.011){
       p.reds = (p.reds || 0) + 1;
+      recordOffence(p, "sent off");
       p.suspensionWeeks = Math.max(p.suspensionWeeks || 0, rndInt(1,4));
       p.morale = clamp(p.morale - 3, 1, 20);
       out.push({p, kind:"red"});
@@ -9659,7 +9675,7 @@ function answerConversation(conv, optionIndex){
   let outcome = opt.label;
 
   if(opt.promise === "starting"){
-    p.promisedStart = { untilWeek: state.week + 8 };   // broken promises cost you later
+    makeStartPromise(p, 8);   // broken promises cost you later
   }
   if(opt.listed){ p.listed = true; outcome += " — he is now transfer listed."; }
   if(opt.captain){ setCaptain(p.id); outcome += ` — ${fullName(p)} is your new captain.`; }
@@ -9670,7 +9686,7 @@ function answerConversation(conv, optionIndex){
     if(!r.ok) p.morale = clamp(p.morale - 4, 1, 20);
   }
   if(opt.fine){
-    const amount = issueFine(p, 1);
+    const amount = issueFine(p, 1, true);   // the conversation is about his conduct
     outcome += amount ? ` — fined ${fmtMoney(amount)}.` : " — but he was fined too recently for another.";
   }
   if(opt.otherMorale){
@@ -9681,13 +9697,35 @@ function answerConversation(conv, optionIndex){
   return {ok:true, outcome};
 }
 
+/* ONE way to promise a player a start. The conversation stored the promise as
+   {untilWeek}, but the action list's button stored a bare week number — which
+   the check below could not read, so a promise made with that button was judged
+   broken the very next week ("He is furious") however you picked him, and his
+   card said "until week undefined". The promise also remembers how many games
+   he and the club had played when you made it, so he is judged on the games
+   SINCE — not his whole season, which could brand a kept promise broken. */
+function makeStartPromise(p, weeks){
+  p.promisedStart = { untilWeek: state.week + weeks, season: state.season,
+    appsAt: p.apps || 0, playedAt: (state.seasonStats && state.seasonStats.played) || 0 };
+}
+function promiseUntil(p){
+  const pr = p.promisedStart;
+  return !pr ? 0 : (typeof pr === "object" ? pr.untilWeek : pr);
+}
+
 // Promises are remembered. Break one and he finds out.
 function checkPromises(){
   const sq = state.squads[state.clubId] || [];
   sq.forEach(p=>{
-    if(!p.promisedStart) return;
-    if(state.week <= p.promisedStart.untilWeek) return;
-    const share = (p.apps||0) / Math.max(1, state.seasonStats.played);
+    let pr = p.promisedStart;
+    if(!pr) return;
+    if(typeof pr === "number"){ makeStartPromise(p, Math.max(0, pr - state.week)); pr = p.promisedStart; }
+    if(pr.appsAt === undefined){ pr.appsAt = p.apps || 0; pr.playedAt = (state.seasonStats && state.seasonStats.played) || 0; pr.season = state.season; }
+    if(pr.season !== undefined && pr.season !== state.season){ p.promisedStart = null; return; }   // a new season: it lapses
+    if(state.week <= pr.untilWeek) return;
+    const games  = ((state.seasonStats && state.seasonStats.played) || 0) - (pr.playedAt || 0);
+    const played = (p.apps || 0) - (pr.appsAt || 0);
+    const share  = games > 0 ? played / games : 1;
     if(share < 0.5){
       p.morale = clamp(p.morale - 8, 1, 20);
       pushNews("Promise broken",
@@ -9699,19 +9737,34 @@ function checkPromises(){
 
 /* ---- Fines ---- */
 // Weeks' wages, as clubs actually do it.
-function canFine(p){
+/* A fine needs a reason. Every player's card offered "Fine 1 week / 2 weeks"
+   at any time, so with only a six-week gap between fines you could fine the
+   whole squad over and over for no offence and bank the money each time. A
+   club can only discipline a player for something he did: a red card, or
+   trouble off the pitch. One fine per offence, within a few weeks of it. */
+const FINE_WINDOW_WEEKS = 4;
+function recordOffence(p, what){ if(p) p.offence = {what, season: state.season, week: state.week}; }
+function openOffence(p){
+  const o = p && p.offence;
+  if(!o || o.season !== state.season) return null;
+  return (state.week - o.week) <= FINE_WINDOW_WEEKS ? o : null;
+}
+function canFine(p, withReason){
+  if(!withReason && !openOffence(p)) return false;
   const last = p.lastFinedWeek;
   if(last === undefined) return true;
   const gap = (state.season*100 + state.week) - last;
   return gap >= 6;                 // roughly once every six weeks, per player
 }
 
-function issueFine(p, weeks){
+function issueFine(p, weeks, withReason){
   // Fining had no limit, so a player could be fined on repeat: morale bottoms
   // out at 1 but the money kept arriving. A club can discipline a player, not
-  // farm him.
-  if(!canFine(p)) return 0;
+  // farm him. `withReason` is for a conversation that is itself about his
+  // conduct; otherwise there must be an offence on record.
+  if(!canFine(p, withReason)) return 0;
   p.lastFinedWeek = state.season*100 + state.week;
+  p.offence = null;                          // one fine per offence
   const amount = Math.round((p.wage || wageDemand(p)) * (weeks||1));
   const club = clubById(state.clubId);
   club.balance += amount;
@@ -10320,6 +10373,13 @@ function processPendingBids(){
       pushNews("Terms rejected", `${nm} has turned down the move.`, "transfer");
     else if(r.outcome === "rejected")
       pushNews("Bid rejected", `${r.from.name} have rejected your bid for ${nm} and ended talks.`, "transfer");
+    // Accepted by his club, but it could not go through — the squad was full,
+    // his wages broke the budget, or the money had gone by then. This said
+    // nothing at all: the bid vanished and the player simply never arrived.
+    else if(r.outcome === "failed")
+      pushNews("Deal fell through",
+        `${r.from.name} accepted your bid for ${nm}, but the deal could not be completed: ` +
+        `${((r.detail && r.detail.reason) || "it could not be completed").replace(/\.$/, "").replace(/^(Your|The|He|Not|There|That)\b/, w=> w.toLowerCase())}. You can bid again once that is sorted.`, "transfer");
   });
   return resolved;
 }
@@ -10972,7 +11032,7 @@ function loanInPlayer(player){
   if(parent) parent.balance += fee;
   state.squads[parentId] = state.squads[parentId].filter(p=>p.id!==player.id);
   player.loanedFrom = parentId;
-  player.wage = Math.round(wageDemand(player) * 0.65);   // parent covers the rest         // remembered so he goes home in the summer
+  player.wage = Math.round(wageDemand(player) * LOAN_WAGE_SHARE);   // parent covers the rest         // remembered so he goes home in the summer
   player.clubId = buyer.id;
   state.squads[buyer.id].push(player);
   pushNews("Loan signing", `${fullName(player)} joins on loan from ${parent?parent.name:"his club"} for ${fmtMoney(fee)}.`, "transfer");
@@ -11743,6 +11803,18 @@ function resolveCupTie(idA, idB){
 // Resolves every tie in the cup's CURRENT round, pays the user's club prize money if
 // involved, builds next round's pairings from the winners, and reports back anything
 // the UI needs to show (the user's own tie, or a title win).
+/* Cup prize money goes to the WINNERS of a round, as in the real FA Cup: the
+   2025-26 first round paid £47,750 to winners and £15,800 to losers, losers in
+   the fourth round, fifth round and quarter-finals got nothing, and beaten
+   semi-finalists and finalists got half. The game paid the full winner's prize
+   to the loser of every tie, so going out in the quarter-finals earned exactly
+   what the side that knocked you out did. `tiesInRound` spots the semi-final
+   (2) and final (1) in any cup, however many rounds it has. */
+function cupRoundPrize(full, roundIdx, tiesInRound, won){
+  if(won) return full;
+  const share = tiesInRound <= 2 ? 0.5 : roundIdx <= 2 ? 0.25 : 0;
+  return Math.round(full * share);
+}
 function advanceCupRound(cupKey){
   const cfg = CUP_CONFIG[cupKey];
   const cup = state.cups[cupKey];
@@ -11766,8 +11838,10 @@ function advanceCupRound(cupKey){
       recordQuickStats(b, res.ag, res.hg);
     }
     if((a===state.clubId || b===state.clubId) && !res.bye){
-      clubById(state.clubId).balance += cfg.prizePerRound[roundIdx];
-      userTie = {a, b, hg:res.hg, ag:res.ag, prize:cfg.prizePerRound[roundIdx], shootout:res.shootout};
+      const won = res.winner === state.clubId;
+      const prize = cupRoundPrize(cfg.prizePerRound[roundIdx], roundIdx, cup.pairings.length, won);
+      clubById(state.clubId).balance += prize;
+      userTie = {a, b, hg:res.hg, ag:res.ag, prize, won, shootout:res.shootout};
     }
   });
   cup.round++;
@@ -14362,6 +14436,15 @@ function transferPool(){
   return out;
 }
 
+function visibleOrder(value, dir){
+  return (a,b)=>{
+    const va = value(a), vb = value(b);
+    if(va === null && vb === null) return fullName(a.p).localeCompare(fullName(b.p));
+    if(va === null) return 1;
+    if(vb === null) return -1;
+    return dir * (vb - va) || fullName(a.p).localeCompare(fullName(b.p));
+  };
+}
 function getTransferResults(){
   const q = transferFilters.query.trim().toLowerCase();
   const myClub = clubById(state.clubId);
@@ -14369,7 +14452,11 @@ function getTransferResults(){
     if(transferFilters.position!=="ALL" && positionsOf(p).indexOf(transferFilters.position) === -1) return false;
     if(transferFilters.tier!=="ALL" && (!club || club.tier!==transferFilters.tier)) return false;
     if(q && !fullName(p).toLowerCase().includes(q)) return false;
-    if(transferFilters.affordableOnly && price > myClub.balance) return false;
+    // Affordable means the deal could go through: the fee AND his wages, as the
+    // purchase itself checks. It only looked at the fee, so "affordable" players
+    // could still be refused because the board would not pay what he earns.
+    if(transferFilters.affordableOnly && (price > myClub.balance ||
+       (transferFilters.mode !== "loan" && !canAffordWages(myClub, p, 1).ok))) return false;
     if(p.age > transferFilters.maxAge) return false;
     if(transferFilters.minAge && p.age < transferFilters.minAge) return false;
     /* Rating and price filters only apply to players you have actually seen.
@@ -14395,10 +14482,15 @@ function getTransferResults(){
     // Keep these deliberately boring: the manager asked for simple, predictable
     // market sorting. Unknown values use their last known/scouted value only;
     // ties fall back to name so the list never appears to shuffle.
-    rating_desc: (a,b)=> ratingOf(b.p)-ratingOf(a.p) || fullName(a.p).localeCompare(fullName(b.p)),
-    rating_asc:  (a,b)=> ratingOf(a.p)-ratingOf(b.p) || fullName(a.p).localeCompare(fullName(b.p)),
-    potential_desc: (a,b)=> potentialOf(b.p)-potentialOf(a.p) || fullName(a.p).localeCompare(fullName(b.p)),
-    potential_asc:  (a,b)=> potentialOf(a.p)-potentialOf(b.p) || fullName(a.p).localeCompare(fullName(b.p)),
+    // Sort by what you can SEE. These used the true hidden numbers for every
+    // player, scouted or not — despite the note above — so sorting by rating put
+    // the best unscouted players at the top and gave away exactly what
+    // scouting is meant to keep hidden. Now: exact where you know him, the
+    // centre of his band where you have one, and unscouted players last, by name.
+    rating_desc: visibleOrder(x=> ratingBand(x.p, ratingOf(x.p)).mid, 1),
+    rating_asc:  visibleOrder(x=> ratingBand(x.p, ratingOf(x.p)).mid, -1),
+    potential_desc: visibleOrder(x=> ratingBand(x.p, potentialOf(x.p), POTENTIAL_WIDTHS, "ceiling").mid, 1),
+    potential_asc:  visibleOrder(x=> ratingBand(x.p, potentialOf(x.p), POTENTIAL_WIDTHS, "ceiling").mid, -1),
     age_asc: (a,b)=>a.p.age-b.p.age || fullName(a.p).localeCompare(fullName(b.p)),
     age_desc: (a,b)=>b.p.age-a.p.age || fullName(a.p).localeCompare(fullName(b.p)),
     price_asc: (a,b)=>a.price-b.price || fullName(a.p).localeCompare(fullName(b.p)),
@@ -15540,7 +15632,7 @@ function openPlayerModal(p, isOwn){
     </div>
     ${p.personality ? `<div class="player-personality"><span>Personality</span><b>${p.personality}</b></div>` : ""}
     ${(p.finesReceived||0) ? `<div style="font-size:11px; color:var(--text-dim); margin-bottom:8px;">Fined ${p.finesReceived} time${p.finesReceived>1?"s":""} at this club</div>` : ""}
-    ${p.promisedStart ? `<div class="injury-box" style="border-color:rgba(232,185,78,0.4);">🤝 <b>Promised a starting place</b> — until week ${p.promisedStart.untilWeek}. Break it and he'll know.</div>` : ""}
+    ${p.promisedStart ? `<div class="injury-box" style="border-color:rgba(232,185,78,0.4);">🤝 <b>Promised a starting place</b> — until week ${promiseUntil(p)}. Break it and he'll know.</div>` : ""}
     ${p.injuryWeeks>0 ? `<div class="injury-box">🚑 <b>${p.injuryName||"Injured"}</b> — out for ${p.injuryWeeks} more week${p.injuryWeeks>1?"s":""}${p.injuryProne?' · <span style="color:var(--bad);">injury prone</span>':''}</div>` : ""}
     ${(state.transferRequests||[]).some(r=>r.playerId===p.id) ? `<div class="injury-box" style="border-color:rgba(232,185,78,0.35);">✋ <b>Transfer request</b> — he ${(state.transferRequests.find(r=>r.playerId===p.id)||{}).reason}.
       <div class="btn-row" style="margin-top:8px;">
@@ -15676,10 +15768,12 @@ function openPlayerModal(p, isOwn){
             })()}
           </div>
         </div>
-        <div class="btn-row">
-          <button class="btn-secondary fine-btn" data-weeks="1" style="flex:1; margin-top:0;">Fine 1 week</button>
-          <button class="btn-secondary fine-btn" data-weeks="2" style="flex:1; margin-top:0;">Fine 2 weeks</button>
-        </div>
+        ${canFine(p) ? `<div class="renew-row" style="display:block;">
+          <div class="renew-name">Discipline — he was ${openOffence(p).what}</div>
+          <div class="btn-row">
+            <button class="btn-secondary fine-btn" data-weeks="1" style="flex:1; margin-top:0;">Fine 1 week</button>
+            <button class="btn-secondary fine-btn" data-weeks="2" style="flex:1; margin-top:0;">Fine 2 weeks</button>
+          </div></div>` : ""}
         ${p.loanedOutTo?`<div class="empty-hint" style="padding:10px;">Out on loan at ${clubById(p.loanedOutTo)?clubById(p.loanedOutTo).name:"another club"} — back at the end of the season.</div>`:""}
         <div style="font-size:11.5px; color:var(--text-dim); margin:8px 0 6px; line-height:1.45;">
           Valued at ${fmtMoney(price)}. Players are only sold when a club bids and you accept —
@@ -16118,9 +16212,9 @@ async function advanceWeek(){
       const domesticFx = {home:t.a, away:t.b, hg:t.hg, ag:t.ag, week};
       const finalDomestic = await playMatchDay(domesticFx, `${outcome.cfg.name} — Round ${outcome.roundIdx+1}`, detail);
       if(finalDomestic){ t.hg=finalDomestic.hg; t.ag=finalDomestic.ag; recordMatchHistory({season:state.season, week, competition:outcome.cfg.name, homeId:t.a, awayId:t.b, hg:t.hg, ag:t.ag, detail}); }
-      toast(`${outcome.cfg.name} prize money: ${fmtMoney(t.prize)}`);
+      if(t.prize > 0) toast(`${outcome.cfg.name} prize money: ${fmtMoney(t.prize)}`);
       pushNews(`${outcome.cfg.name} Round ${outcome.roundIdx+1}`,
-        `${clubName(t.a)} ${t.hg}-${t.ag} ${clubName(t.b)}. Prize money: ${fmtMoney(t.prize)}.`, "cup");
+        `${clubName(t.a)} ${t.hg}-${t.ag} ${clubName(t.b)}.` + (t.prize > 0 ? ` Prize money: ${fmtMoney(t.prize)}.` : ""), "cup");
       checkAchievements({cupRoundReached: outcome.roundIdx+1});
     }
     if(outcome.champion){
@@ -16145,7 +16239,7 @@ async function advanceWeek(){
     const natFx = {home:t.a, away:t.b, hg:t.hg, ag:t.ag, week};
     const finalNat = await playMatchDay(natFx, pendingNatCupTie.name, detail);
     if(finalNat){ t.hg=finalNat.hg; t.ag=finalNat.ag; recordMatchHistory({season:state.season, week, competition:pendingNatCupTie.name, homeId:t.a, awayId:t.b, hg:t.hg, ag:t.ag, detail}); }
-    toast(`${pendingNatCupTie.name} prize: ${fmtMoney(t.prize)}`);
+    if(t.prize > 0) toast(`${pendingNatCupTie.name} prize: ${fmtMoney(t.prize)}`);
   }
 
   const pending = state.tiers[userTier]._pendingUserFixture;
@@ -17764,7 +17858,7 @@ function collectActions(){
               && p.lastUnhappyDecisionWeek !== (state.season*100 + state.week)
               // A promise made is a promise pending — don't ask again every
               // week while he is actually starting.
-              && !(p.promisedStart && state.week <= p.promisedStart)
+              && !(p.promisedStart && state.week <= promiseUntil(p))
               && !(state.lineup||[]).includes(p.id)
               && !(state.transferRequests||[]).some(r=>r.playerId===p.id))
     .forEach(p=>{
@@ -17792,7 +17886,7 @@ function collectActions(){
         }});
       }
       buttons.push({label:"Promise him a start", run:()=>{
-        p.promisedStart = state.week + 4;
+        makeStartPromise(p, 4);
         p.morale = clamp((p.morale||6) + 5, 1, 20);
         return `${fullName(p)} has your word — he expects to play`;
       }});
@@ -19206,15 +19300,15 @@ function knowledgeOf(p){
    gave away his read on the ceiling. */
 function ratingBand(p, trueVal, widths, seed){
   const lvl = knowledgeOf(p);
-  if(lvl >= 3) return {exact:true, text:String(Math.round(trueVal))};
+  if(lvl >= 3) return {exact:true, text:String(Math.round(trueVal)), mid:trueVal};
   // Unseen means unseen. A band, however wide, is still information you have
   // not earned — and a wide band around the truth is easy to average out by
   // opening the card twice.
-  if(lvl === 0) return {exact:false, text:"?"};
+  if(lvl === 0) return {exact:false, text:"?", mid:null};
   const width = (widths || [9, 6, 3])[lvl];
   const wobble = ((hashStr(p.id + (seed || "band")) % 200) / 100 - 1) * (width * 0.4);
   const mid = Math.round(trueVal + wobble);
-  return {exact:false, text: Math.max(1, mid - width) + "–" + Math.min(99, mid + width)};
+  return {exact:false, text: Math.max(1, mid - width) + "–" + Math.min(99, mid + width), mid};
 }
 
 function shownRating(p){ return ratingBand(p, ratingOf(p)).text; }
